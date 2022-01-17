@@ -434,11 +434,8 @@ class GreedyHumanModel(Agent):
         else:
             player_obj = player.get_object()
 
-            if player_obj.name == 'onion':
-                motion_goals = am.put_onion_in_pot_actions(pot_states_dict)
-
-            elif player_obj.name == 'tomato':
-                motion_goals = am.put_tomato_in_pot_actions(pot_states_dict)
+            if player_obj.name in am.mdp.ALL_INGREDIENTS:
+                motion_goals = am.put_ingredient_in_pot_actions(pot_states_dict, player_obj.name)
 
             elif player_obj.name == 'dish':
                 motion_goals = am.pickup_soup_with_dish_actions(pot_states_dict, only_nearly_ready=True)
