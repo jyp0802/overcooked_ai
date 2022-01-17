@@ -1,6 +1,6 @@
 import itertools, copy, warnings
 import numpy as np
-import yaml
+import yaml, os
 from functools import reduce
 from collections import defaultdict, Counter
 from overcooked_ai_py.utils import pos_distance, read_layout_dict, classproperty
@@ -10,9 +10,8 @@ from overcooked_ai_py.mdp.actions import Action, Direction
 TODO:
 change .format to f'strings'
 '''
-
-
-config = yaml.safe_load(open('overcooked_ai/src/overcooked_ai_py/mdp/my_config.yaml', 'r'))
+cur_file_dir = os.path.dirname(os.path.abspath(__file__))
+config = yaml.safe_load(open(os.path.join(cur_file_dir, 'my_config.yaml'), 'r'))
 
 ALL_INGREDIENTS = config['ingredients']
 NUM_INGREDIENT_TYPE = len(ALL_INGREDIENTS)
