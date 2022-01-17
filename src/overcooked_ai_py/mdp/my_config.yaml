@@ -1,23 +1,23 @@
-ingredients: ['tomato', 'onion']
-objects: ['tomato', 'onion', 'dish']
+ingredients: ['meat', 'onion']
+objects: ['meat', 'onion', 'dish']
 max_num_ingredients: 3
 recipe_representation:
-  tomato: '†'
+  meat: '†' ## 이건 대체.. ^^
   onion: 'ø'
 object_to_symbol:
-  tomato: 'T'
+  meat: 'M'
   onion: 'O'
 potential_constants:
   default:
     max_delivery_steps: 10
     max_pickup_steps: 10
     pot_onion_steps: 10
-    pot_tomato_steps: 10
-  mdp_test_tomato:
+    pot_meat_steps: 10
+  mdp_test_meat:
     max_delivery_steps: 4
     max_pickup_steps: 4
     pot_onion_steps: 5
-    pot_tomato_steps: 6
+    pot_meat_steps: 6
 default_potential:
-  tomato: 13
+  meat: 13
   onion: 21

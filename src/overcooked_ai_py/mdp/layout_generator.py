@@ -8,12 +8,12 @@ from overcooked_ai_py.mdp.overcooked_mdp import OvercookedGridworld, Recipe
 EMPTY = ' '
 COUNTER = 'X'
 ONION_DISPENSER = 'O'
-TOMATO_DISPENSER = 'T'
+MEAT_DISPENSER = 'T'
 POT = 'P'
 DISH_DISPENSER = 'D'
 SERVING_LOC = 'S'
-
-CODE_TO_TYPE = {0: EMPTY, 1: COUNTER, 2: ONION_DISPENSER, 3: TOMATO_DISPENSER, 4: POT, 5: DISH_DISPENSER,
+# ^^ code_to_type : meat 는 7 로 바꿈 
+CODE_TO_TYPE = {0: EMPTY, 1: COUNTER, 2: ONION_DISPENSER, 7: MEAT_DISPENSER, 4: POT, 5: DISH_DISPENSER,
                 6: SERVING_LOC}
 TYPE_TO_CODE = {v: k for k, v in CODE_TO_TYPE.items()}
 

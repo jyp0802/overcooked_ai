@@ -2,7 +2,7 @@ import pygame
 import os, copy, math
 from overcooked_ai_py.utils import generate_temporary_file_path, classproperty, cumulative_rewards_from_rew_list
 from overcooked_ai_py.static import GRAPHICS_DIR, FONTS_DIR
-from overcooked_ai_py.mdp.layout_generator import EMPTY, COUNTER, ONION_DISPENSER, TOMATO_DISPENSER, POT, DISH_DISPENSER, SERVING_LOC
+from overcooked_ai_py.mdp.layout_generator import EMPTY, COUNTER, ONION_DISPENSER, MEAT_DISPENSER, POT, DISH_DISPENSER, SERVING_LOC
 from overcooked_ai_py.visualization.visualization_utils import show_image_in_ipython, show_ipython_images_slider
 from overcooked_ai_py.visualization.pygame_utils import MultiFramePygameImage, run_static_resizeable_window, vstack_surfaces, scale_surface_by_factor, blit_on_new_surface_of_size
 from overcooked_ai_py.mdp.actions import Direction, Action
@@ -12,7 +12,7 @@ roboto_path = os.path.join(FONTS_DIR, "Roboto-Regular.ttf")
 
 class StateVisualizer:
     TERRAINS_IMG = MultiFramePygameImage(os.path.join(GRAPHICS_DIR, 'terrain.png'), os.path.join(GRAPHICS_DIR, 'terrain.json'))
-    OBJECTS_IMG = MultiFramePygameImage(os.path.join(GRAPHICS_DIR, 'objects.png'), os.path.join(GRAPHICS_DIR, 'objects.json'))
+    OBJECTS_IMG = MultiFramePygameImage(os.path.join(GRAPHICS_DIR, 'objects_meat.png'), os.path.join(GRAPHICS_DIR, 'objects_meat.json'))
     SOUPS_IMG = MultiFramePygameImage(os.path.join(GRAPHICS_DIR, 'soups.png'), os.path.join(GRAPHICS_DIR, 'soups.json'))
     CHEFS_IMG = MultiFramePygameImage(os.path.join(GRAPHICS_DIR, 'chefs.png'), os.path.join(GRAPHICS_DIR, 'chefs.json'))
     ARROW_IMG = pygame.image.load(os.path.join(GRAPHICS_DIR, 'arrow.png'))
@@ -51,7 +51,7 @@ class StateVisualizer:
         EMPTY: "floor",
         COUNTER: "counter",
         ONION_DISPENSER: "onions",
-        TOMATO_DISPENSER: "tomatoes",
+        MEAT_DISPENSER: "meats",
         POT: "pot",
         DISH_DISPENSER: "dishes",
         SERVING_LOC: "serve"
@@ -273,7 +273,7 @@ class StateVisualizer:
             if held_obj is None:
                 held_object_name = ""
             else:
-                if held_obj.name == "soup":
+                if held_obj.name == "soup": # agent가 들고 있는 object가 soup인 경우 
                     if "onion" in held_obj.ingredients:
                         held_object_name = "soup-onion"
                     else:
