@@ -1,6 +1,7 @@
 import itertools, copy, warnings
 import numpy as np
 import yaml
+import os
 from functools import reduce
 from collections import defaultdict, Counter
 from overcooked_ai_py.utils import pos_distance, read_layout_dict, classproperty
@@ -11,8 +12,9 @@ TODO:
 change .format to f'strings'
 '''
 
-
-config = yaml.safe_load(open('overcooked_ai/src/overcooked_ai_py/mdp/my_config.yaml', 'r'))
+cur_file_dir = os.path.dirname(os.path.abspath(__file__))
+config = yaml.safe_load(open(os.path.join(cur_file_dir, 'my_config.yaml'), 'r'))
+# config = yaml.safe_load(open('overcooked_ai/src/overcooked_ai_py/mdp/my_config.yaml', 'r'))
 
 ALL_INGREDIENTS = config['ingredients']
 NUM_INGREDIENT_TYPE = len(ALL_INGREDIENTS)
@@ -799,11 +801,18 @@ BASE_REW_SHAPING_PARAMS = {
 
 EVENT_TYPES = [
     # Tomato events
-    'tomato_pickup',
-    'useful_tomato_pickup',
-    'tomato_drop',
-    'useful_tomato_drop',
-    'potting_tomato',
+    # 'tomato_pickup',
+    # 'useful_tomato_pickup',
+    # 'tomato_drop',
+    # 'useful_tomato_drop',
+    # 'potting_tomato',
+
+    # Meat events
+    'meat_pickup',
+    'useful_meat_pickup',
+    'meat_drop',
+    'useful_meat_drop',
+    'potting_meat',
 
     # Onion events
     'onion_pickup',
@@ -824,14 +833,23 @@ EVENT_TYPES = [
     'soup_drop',
 
     # Potting events
+    # 'optimal_onion_potting',
+    # 'optimal_tomato_potting',
+    # 'viable_onion_potting',
+    # 'viable_tomato_potting',
+    # 'catastrophic_onion_potting',
+    # 'catastrophic_tomato_potting',
+    # 'useless_onion_potting',
+    # 'useless_tomato_potting'
+
     'optimal_onion_potting',
-    'optimal_tomato_potting',
+    'optimal_meat_potting',
     'viable_onion_potting',
-    'viable_tomato_potting',
+    'viable_meat_potting',
     'catastrophic_onion_potting',
-    'catastrophic_tomato_potting',
+    'catastrophic_meat_potting',
     'useless_onion_potting',
-    'useless_tomato_potting'
+    'useless_meat_potting'
 ]
 
 class OvercookedGridworld(object):
@@ -886,6 +904,7 @@ class OvercookedGridworld(object):
         base_layout_params = read_layout_dict(layout_name)
 
         grid = base_layout_params['grid']
+        print("grid value: ", grid)
         del base_layout_params['grid']
         base_layout_params['layout_name'] = layout_name
         if 'start_state' in base_layout_params:
@@ -1903,6 +1922,8 @@ class OvercookedGridworld(object):
                             state_mask_dict["soup_cook_time_remaining"] += make_layer(obj.position, obj.cook_time - obj._cooking_tick)
                             if obj.is_ready:
                                 state_mask_dict["soup_done"] += make_layer(obj.position, 1)
+                                print("--------------------------------------------")
+                                print(state_mask_dict)
 
                     else:
                         # If player soup is not in a pot, treat it like a soup that is cooked with remaining time 0

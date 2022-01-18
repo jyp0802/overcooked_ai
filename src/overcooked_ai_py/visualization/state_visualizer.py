@@ -9,6 +9,7 @@ from overcooked_ai_py.mdp.actions import Direction, Action
 
 roboto_path = os.path.join(FONTS_DIR, "Roboto-Regular.ttf")
 
+print("state visualizer come here ??")
 
 class StateVisualizer:
     TERRAINS_IMG = MultiFramePygameImage(os.path.join(GRAPHICS_DIR, 'terrain.png'), os.path.join(GRAPHICS_DIR, 'terrain.json'))
@@ -62,6 +63,7 @@ class StateVisualizer:
         params.update(kwargs)
         self.configure(**params)
         self.reload_fonts()
+        print("in the state_visualizer")
 
     def reload_fonts(self):
         pygame.font.init()

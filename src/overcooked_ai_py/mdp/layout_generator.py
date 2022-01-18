@@ -8,7 +8,7 @@ from overcooked_ai_py.mdp.overcooked_mdp import OvercookedGridworld, Recipe
 EMPTY = ' '
 COUNTER = 'X'
 ONION_DISPENSER = 'O'
-MEAT_DISPENSER = 'T'
+MEAT_DISPENSER = 'M'
 POT = 'P'
 DISH_DISPENSER = 'D'
 SERVING_LOC = 'S'
