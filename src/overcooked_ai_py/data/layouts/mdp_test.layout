@@ -11,8 +11,8 @@
     "start_bonus_orders" : [
         { "ingredients" : ["onion", "tomato", "onion"]}
     ],
-    "tomato_value" : 5,
-    "onion_value" : 10,
+    "tomato_ingr_value" : 5,
+    "onion_ingr_value" : 10,
     "tomato_time" : 2,
     "onion_time" : 2
 }

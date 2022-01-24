@@ -1031,54 +1031,55 @@ class TestOvercookedEnvironment(unittest.TestCase):
                 if left_out_optional_features:
                     self.assertFalse(any(elem in terrain_features for elem in left_out_optional_features)) # all left_out optional_features are not used
 
-    def test_random_layout_generated_recipes(self):
-        only_onions_recipes = [Recipe(["onion", "onion"]), Recipe(["onion", "onion", "onion"])]
-        only_onions_dict_recipes = [r.to_dict() for r in only_onions_recipes]
+# JYP: no need to generate random recipes now
+    # def test_random_layout_generated_recipes(self):
+    #     only_onions_recipes = [Recipe(["onion", "onion"]), Recipe(["onion", "onion", "onion"])]
+    #     only_onions_dict_recipes = [r.to_dict() for r in only_onions_recipes]
 
-        # checking if recipes are generated from mdp_params
-        mdp_gen_params = {"generate_all_orders": {"n":2, "ingredients": ["onion"], "min_size":2, "max_size":3},
-                        "prop_feats": 0.9,
-                        "prop_empty": 0.1,
-                        "inner_shape": (6, 5),
-                        "display": False}
-        mdp_fn = LayoutGenerator.mdp_gen_fn_from_dict(mdp_gen_params, outer_shape=(6, 5))
-        env = OvercookedEnv(mdp_fn, **DEFAULT_ENV_PARAMS)
-        for _ in range(10):
-            env.reset()
-            self.assertCountEqual(env.mdp.start_all_orders, only_onions_dict_recipes)
-            self.assertEqual(len(env.mdp.start_bonus_orders), 0)
+    #     # checking if recipes are generated from mdp_params
+    #     mdp_gen_params = {"generate_all_orders": {"n":2, "ingredients": ["onion"], "min_size":2, "max_size":3},
+    #                     "prop_feats": 0.9,
+    #                     "prop_empty": 0.1,
+    #                     "inner_shape": (6, 5),
+    #                     "display": False}
+    #     mdp_fn = LayoutGenerator.mdp_gen_fn_from_dict(mdp_gen_params, outer_shape=(6, 5))
+    #     env = OvercookedEnv(mdp_fn, **DEFAULT_ENV_PARAMS)
+    #     for _ in range(10):
+    #         env.reset()
+    #         self.assertCountEqual(env.mdp.start_all_orders, only_onions_dict_recipes)
+    #         self.assertEqual(len(env.mdp.start_bonus_orders), 0)
         
-        # checking if bonus_orders is subset of all_orders even if not specified
+    #     # checking if bonus_orders is subset of all_orders even if not specified
 
-        mdp_gen_params = {"generate_all_orders": {"n":2, "ingredients": ["onion"], "min_size":2, "max_size":3},
-                        "generate_bonus_orders": {"n":1, "min_size":2, "max_size":3},
-                        "prop_feats": 0.9,
-                        "prop_empty": 0.1,
-                        "inner_shape": (6, 5),
-                        "display": False}
-        mdp_fn = LayoutGenerator.mdp_gen_fn_from_dict(mdp_gen_params, outer_shape=(6,5))
-        env = OvercookedEnv(mdp_fn, **DEFAULT_ENV_PARAMS)
-        for _ in range(10):
-            env.reset()
-            self.assertCountEqual(env.mdp.start_all_orders, only_onions_dict_recipes)
-            self.assertEqual(len(env.mdp.start_bonus_orders), 1)
-            self.assertTrue(env.mdp.start_bonus_orders[0] in only_onions_dict_recipes)
+    #     mdp_gen_params = {"generate_all_orders": {"n":2, "ingredients": ["onion"], "min_size":2, "max_size":3},
+    #                     "generate_bonus_orders": {"n":1, "min_size":2, "max_size":3},
+    #                     "prop_feats": 0.9,
+    #                     "prop_empty": 0.1,
+    #                     "inner_shape": (6, 5),
+    #                     "display": False}
+    #     mdp_fn = LayoutGenerator.mdp_gen_fn_from_dict(mdp_gen_params, outer_shape=(6,5))
+    #     env = OvercookedEnv(mdp_fn, **DEFAULT_ENV_PARAMS)
+    #     for _ in range(10):
+    #         env.reset()
+    #         self.assertCountEqual(env.mdp.start_all_orders, only_onions_dict_recipes)
+    #         self.assertEqual(len(env.mdp.start_bonus_orders), 1)
+    #         self.assertTrue(env.mdp.start_bonus_orders[0] in only_onions_dict_recipes)
 
-        # checking if after reset there are new recipes generated
-        mdp_gen_params = {"generate_all_orders": {"n":3, "min_size":2, "max_size":3},
-                        "prop_feats": 0.9,
-                        "prop_empty": 0.1,
-                        "inner_shape": (6, 5),
-                        "display": False,
-                        "feature_types": [POT, DISH_DISPENSER, SERVING_LOC, ONION_DISPENSER, TOMATO_DISPENSER]
-                        }
-        mdp_fn = LayoutGenerator.mdp_gen_fn_from_dict(mdp_gen_params, outer_shape=(6,5))
-        env = OvercookedEnv(mdp_fn, **DEFAULT_ENV_PARAMS)
-        generated_recipes_strings = set()
-        for _ in range(20):
-            env.reset()
-            generated_recipes_strings |= {json.dumps(o, sort_keys=True) for o in env.mdp.start_all_orders}
-        self.assertTrue(len(generated_recipes_strings) > 3)
+    #     # checking if after reset there are new recipes generated
+    #     mdp_gen_params = {"generate_all_orders": {"n":3, "min_size":2, "max_size":3},
+    #                     "prop_feats": 0.9,
+    #                     "prop_empty": 0.1,
+    #                     "inner_shape": (6, 5),
+    #                     "display": False,
+    #                     "feature_types": [POT, DISH_DISPENSER, SERVING_LOC, ONION_DISPENSER, TOMATO_DISPENSER]
+    #                     }
+    #     mdp_fn = LayoutGenerator.mdp_gen_fn_from_dict(mdp_gen_params, outer_shape=(6,5))
+    #     env = OvercookedEnv(mdp_fn, **DEFAULT_ENV_PARAMS)
+    #     generated_recipes_strings = set()
+    #     for _ in range(20):
+    #         env.reset()
+    #         generated_recipes_strings |= {json.dumps(o, sort_keys=True) for o in env.mdp.start_all_orders}
+    #     self.assertTrue(len(generated_recipes_strings) > 3)
         
         
 class TestGymEnvironment(unittest.TestCase):

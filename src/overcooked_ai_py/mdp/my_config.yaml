@@ -1,12 +1,58 @@
-ingredients: ['tomato', 'onion']
-objects: ['tomato', 'onion', 'dish']
+raw_foods: ["tomato", "onion"]
+containers: ["dish", "pot"]
+deliverable_containers: ["dish"]
+dispensers: ["tomato", "onion", "dish"]
+
+terrains: ["tomato", "onion", "dish", "deliver", "stove", "counter"]
+
+default_objects:
+  stove: "pot"
+
 max_num_ingredients: 3
-recipe_representation:
-  tomato: '†'
-  onion: 'ø'
-object_to_symbol:
-  tomato: 'T'
-  onion: 'O'
+
+object_representation:
+  tomato: "†"
+  onion: "ø"
+  dish: "ⓓ"
+  pot: "ⓟ"
+terrain_to_symbol:
+  tomato: "T"
+  onion: "O"
+  dish: "D"
+  deliver: "_"
+  stove: "S"
+  counter: "X"
+  floor: " "
+
+container_info:
+  dish:
+    cook_time: 0
+    max_ingredients: 1
+    can_add: ["tomato1soup"]
+  pot:
+    cook_time: 40
+    max_ingredients: 3
+    can_add: ["tomato", "onion"]
+    activate_on: "stove"
+
+recipe_info: [
+  ["tomato", "pot", "tomato1soup"],
+  ["tomato, tomato", "pot", "tomato2soup"],
+  ["tomato, tomato, tomato", "pot", "tomato3soup"],
+  ["onion", "pot", "onion1soup"],
+  ["onion, onion", "pot", "onion2soup"],
+  ["onion, onion, onion", "pot", "onion3soup"]
+]
+
+
+BASE_REW_SHAPING_PARAMS:
+  PLACEMENT_IN_POT_REW: 3
+  DISH_PICKUP_REWARD: 3
+  SOUP_PICKUP_REWARD: 5
+  DISH_DISP_DISTANCE_REW: 0
+  POT_DISTANCE_REW: 0
+  SOUP_DISTANCE_REW: 0
+
 potential_constants:
   default:
     max_delivery_steps: 10
@@ -21,3 +67,5 @@ potential_constants:
 default_potential:
   tomato: 13
   onion: 21
+default_recipe_value: 20
+default_recipe_time: 20

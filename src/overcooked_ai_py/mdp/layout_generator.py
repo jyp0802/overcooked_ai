@@ -156,7 +156,7 @@ class LayoutGenerator(object):
     @staticmethod
     def create_base_params(mdp_gen_params):
         assert mdp_gen_params.get("start_all_orders") or mdp_gen_params.get("generate_all_orders")
-        mdp_gen_params = LayoutGenerator.add_generated_mdp_params_orders(mdp_gen_params)
+        # mdp_gen_params = LayoutGenerator.add_generated_mdp_params_orders(mdp_gen_params) # JYP: no need for this anymore
         recipe_params = {"start_all_orders": mdp_gen_params["start_all_orders"]}
         if mdp_gen_params.get("start_bonus_orders"):
             recipe_params["start_bonus_orders"] = mdp_gen_params["start_bonus_orders"]
@@ -167,17 +167,19 @@ class LayoutGenerator(object):
         return recipe_params
         
     @staticmethod
-    def add_generated_mdp_params_orders(mdp_params):
+    def add_generated_mdp_params_orders(mdp_params): # JYP: no need for this anymore
         """
         adds generated parameters (i.e. generated orders) to mdp_params,
         returns onchanged copy of mdp_params when there is no "generate_all_orders" and "generate_bonus_orders" keys inside mdp_params
         """
         mdp_params = copy.deepcopy(mdp_params)
-        if mdp_params.get("generate_all_orders"):
+        if mdp_params.get("generate_all_orders"): # JYP: shouldn't go in here now
+            assert False
             all_orders_kwargs = copy.deepcopy(mdp_params["generate_all_orders"])
 
             if all_orders_kwargs.get("recipes"):
-                 all_orders_kwargs["recipes"] = [Recipe.from_dict(r) for r in all_orders_kwargs["recipes"]]
+                assert False
+                #  all_orders_kwargs["recipes"] = [Recipe.from_dict(r) for r in all_orders_kwargs["recipes"]]
         
             all_recipes = Recipe.generate_random_recipes(**all_orders_kwargs)
             mdp_params["start_all_orders"] = [r.to_dict() for r in all_recipes]
@@ -185,7 +187,8 @@ class LayoutGenerator(object):
             Recipe.configure({})
             all_recipes = Recipe.ALL_RECIPES
 
-        if mdp_params.get("generate_bonus_orders"):
+        if mdp_params.get("generate_bonus_orders"): # JYP: shouldn't go in here now
+            assert False
             bonus_orders_kwargs = copy.deepcopy(mdp_params["generate_bonus_orders"])
 
             if not bonus_orders_kwargs.get("recipes"): 

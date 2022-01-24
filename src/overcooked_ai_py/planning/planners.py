@@ -910,13 +910,13 @@ class MediumLevelActionManager(object):
         return player_actions
 
     def pickup_ingredient_actions(self, counter_objects, ingredient):
-        ingredient_dispenser_locations = self.mdp.get_ingredient_dispenser_locations()
+        ingredient_dispenser_locations = self.mdp.get_terrain_locations(ingredient)
         ingredient_pickup_locations = ingredient_dispenser_locations + counter_objects[ingredient]
         return self._get_ml_actions_for_positions(ingredient_pickup_locations)
 
     def pickup_dish_actions(self, counter_objects, only_use_dispensers=False):
         """If only_use_dispensers is True, then only take dishes from the dispensers"""
-        dish_pickup_locations = self.mdp.get_dish_dispenser_locations()
+        dish_pickup_locations = self.mdp.get_terrain_locations('dish')
         if not only_use_dispensers:
             dish_pickup_locations += counter_objects['dish']
         return self._get_ml_actions_for_positions(dish_pickup_locations)
@@ -937,7 +937,7 @@ class MediumLevelActionManager(object):
         return self._get_ml_actions_for_positions(valid_empty_counters)
 
     def deliver_soup_actions(self):
-        serving_locations = self.mdp.get_serving_locations()
+        serving_locations = self.mdp.get_terrain_locations('deliver')
         return self._get_ml_actions_for_positions(serving_locations)
 
     def put_ingredient_in_pot_actions(self, pot_states_dict, ingredient):
@@ -954,17 +954,17 @@ class MediumLevelActionManager(object):
         return self._get_ml_actions_for_positions(ready_pot_locations + nearly_ready_pot_locations)
 
     def go_to_closest_feature_actions(self, player):
-        feature_locations = self.mdp.get_pot_locations() + self.mdp.get_dish_dispenser_locations()
+        feature_locations = self.mdp.get_terrain_locations('pot') + self.mdp.get_terrain_locations('dish')
         for elem in self.mdp.ALL_INGREDIENTS:
-            feature_locations += self.mdp.get_ingredient_dispenser_locations(elem)
+            feature_locations += self.mdp.get_terrain_locations(elem)
         closest_feature_pos = self.motion_planner.min_cost_to_feature(player.pos_and_or, feature_locations, with_argmin=True)[1]
         return self._get_ml_actions_for_positions([closest_feature_pos])
 
     def go_to_closest_feature_or_counter_to_goal(self, goal_pos_and_or, goal_location):
         """Instead of going to goal_pos_and_or, go to the closest feature or counter to this goal, that ISN'T the goal itself"""
-        valid_locations = self.mdp.get_pot_locations() + self.mdp.get_dish_dispenser_locations() + self.counter_drop
+        valid_locations = self.mdp.get_terrain_locations('pot') + self.mdp.get_terrain_locations('dish') + self.counter_drop
         for elem in self.mdp.ALL_INGREDIENTS:
-            valid_locations += self.mdp.get_ingredient_dispenser_locations(elem)
+            valid_locations += self.mdp.get_terrain_locations(elem)
         valid_locations.remove(goal_location)
         closest_non_goal_feature_pos = self.motion_planner.min_cost_to_feature(
                                             goal_pos_and_or, valid_locations, with_argmin=True)[1]

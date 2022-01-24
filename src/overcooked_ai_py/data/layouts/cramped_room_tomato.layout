@@ -11,8 +11,8 @@
         { "ingredients" : ["tomato", "tomato", "tomato"]},
         { "ingredients" : ["tomato", "onion"] }
     ],
-    "tomato_value" : 10,
-    "onion_value" : 15,
+    "tomato_ingr_value" : 10,
+    "onion_ingr_value" : 15,
     "tomato_time" : 10,
     "onion_time" :10,
     "rew_shaping_params": None
