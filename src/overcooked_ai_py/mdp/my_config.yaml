@@ -3,7 +3,7 @@ containers: ["dish", "pot"]
 deliverable_containers: ["dish"]
 dispensers: ["tomato", "onion", "dish"]
 
-terrains: ["tomato", "onion", "dish", "deliver", "stove", "counter"]
+terrains: ["tomato", "onion", "dish", "deliver", "stove", "counter", "bin"]
 
 default_objects:
   stove: "pot"
@@ -22,6 +22,7 @@ terrain_to_symbol:
   deliver: "_"
   stove: "S"
   counter: "X"
+  bin: "B"
   floor: " "
 
 container_info:
@@ -34,6 +35,9 @@ container_info:
     max_ingredients: 3
     can_add: ["tomato", "onion"]
     activate_on: "stove"
+
+station_info:
+  stove: ["pot"]
 
 recipe_info: [
   ["tomato", "pot", "tomato1soup"],
