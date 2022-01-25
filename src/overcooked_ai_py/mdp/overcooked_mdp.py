@@ -1441,7 +1441,7 @@ class OvercookedGridworld(object):
             for pos in self.get_terrain_locations(station):
                 if state.has_object(pos):
                     obj = state.get_object(pos)
-                    if obj.name in activate_objects and obj.is_cooking and type(obj) is ContainerState:
+                    if type(obj) is ContainerState and obj.is_cooking and obj.name in activate_objects:
                         obj.cook()
 
     def _handle_collisions(self, old_positions, new_positions):
