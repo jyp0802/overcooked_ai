@@ -41,12 +41,13 @@ config = yaml.safe_load(open(os.path.join(cur_file_dir, 'my_config.yaml'), 'r'))
 
 
 CFG_CONTAINER_INFO = config['container_info']
-CFG_RECIPE = config['recipe_info']
-CFG_RECIPE_12_3 = {(a, b): c for (a, b, c) in CFG_RECIPE}
-CFG_RECIPE_3_12 = {c: (a, b) for (a, b, c) in CFG_RECIPE}
+CFG_STATION_INFO = config['station_info']
+CFG_RECIPE_INFO = config['recipe_info']
+CFG_RECIPE_12_3 = {(a, b): c for (a, b, c) in CFG_RECIPE_INFO}
+CFG_RECIPE_3_12 = {c: (a, b) for (a, b, c) in CFG_RECIPE_INFO}
 # JYP: Need to fix for the case where the same ingredients lead
 # to different outcomes depending on the container used.
-CFG_RECIPE_1_23 = {a: (b, c) for (a, b, c) in CFG_RECIPE}
+CFG_RECIPE_1_23 = {a: (b, c) for (a, b, c) in CFG_RECIPE_INFO}
 
 CFG_ALL_RAWFOOD = config['raw_foods']
 CFG_ALL_INGREDIENTS = list(set(CFG_ALL_RAWFOOD + list(CFG_RECIPE_3_12.keys())))
@@ -192,7 +193,7 @@ class Recipe:
             return self._value_mapping[self]
         if all(v is None for v in self._ingredient_value.values()):
             all_value = 0
-            stack = self._ingredients
+            stack = self._ingredients.copy()
             while stack:
                 cur_food = stack.pop()
                 if self._ingredient_value[cur_food] != None:
@@ -201,7 +202,7 @@ class Recipe:
                     sub_foods, cont = CFG_RECIPE_3_12[cur_food]
                     sub_foods = sub_foods.split(", ")
                     stack += sub_foods
-                    all_time += CFG_CONTAINER_INFO[cont]['cook_time']
+                    all_value += CFG_CONTAINER_INFO[cont]['cook_time']
             self._delivery_reward = all_value
             return self._delivery_reward
         return CFG_DEFAULT_RECIPE_VALUE
@@ -213,7 +214,7 @@ class Recipe:
         if self._time_mapping and self in self._time_mapping:
             return self._time_mapping[self]
         all_time = 0
-        stack = self._ingredients
+        stack = self._ingredients.copy()
         while stack:
             cur_food = stack.pop()
             if cur_food in CFG_RECIPE_3_12:
@@ -328,7 +329,6 @@ class Recipe:
 
         if 'recipe_times' in conf:
             assert "all_orders has changed from dict to recipe food name" == ""
-            print('bye', conf['all_orders'], conf['recipe_times'])
             cls._time_mapping = {
                 cls.from_dict(recipe) : time for (recipe, time) in zip(conf['all_orders'], conf['recipe_times'])
             }
@@ -373,7 +373,7 @@ class Recipe:
     def get_result_food_name(cls, ingredient_names, container_name):
         ingredient_str = ", ".join(sorted(ingredient_names))
         if (ingredient_str, container_name) not in CFG_RECIPE_12_3:
-            raise ValueError(f"Recipe for {ingredient_str} and {container_name} doesn't exist in config!")
+            return None
         return CFG_RECIPE_12_3[(ingredient_str, container_name)]
         
 
@@ -418,7 +418,7 @@ class FoodState(object):
             self.name, self.position)
 
     def __str__(self):
-        return CFG_STR_REP[self.name]
+        return CFG_STR_REP.get(self.name, f"[{self.name}]")
 
     def to_dict(self):
         return {
@@ -473,13 +473,13 @@ class ContainerState(object):
 
     def __repr__(self):
         ingredients_str = self._ingredients.__repr__()
-        return "{}@{}\nIngredients:\t{}\nCooking Tick:\t{}" \
+        return "{}@{} - Ingredients: {} - Cooking Tick: {}" \
             .format(self.name, self.position, ingredients_str, self._cooking_tick)
 
     def __str__(self):
         res = "{"
         for ingredient in sorted(self.ingredients):
-            res += CFG_STR_REP[ingredient]
+            res += CFG_STR_REP.get(ingredient, f"[{ingredient}]")
         if self.is_cooking:
             res += str(self._cooking_tick)
         elif self.is_ready:
@@ -521,11 +521,19 @@ class ContainerState(object):
 
     @property
     def is_full(self):
-        return not self.is_idle or len(self.ingredients) == self.max_ingredients
+        return len(self.ingredients) == self.max_ingredients
 
     @property
     def is_empty(self):
         return len(self.ingredients) == 0
+
+    @property
+    def recipe(self):
+        if self.is_idle:
+            raise ValueError("Recipe is not determined until soup begins cooking")
+        if not self._recipe:
+            self._recipe = Recipe(self.ingredients)
+        return self._recipe
 
     @property
     def result_food_name(self):
@@ -566,11 +574,6 @@ class ContainerState(object):
             raise ValueError("Reached maximum number of ingredients in this container")
         ingredient.position = self.position
         self._ingredients.append(ingredient)
-        # JYP: Let's change it so that cooking starts once a button is pressed
-        # if self.is_idle:
-        #     self.begin_cooking()
-        # else:
-        #     self._cooking_tick /= 2
 
     def add_ingredient_from_str(self, ingredient_str):
         ingredient_obj = FoodState(ingredient_str, self.position)
@@ -584,11 +587,8 @@ class ContainerState(object):
         self._cooking_tick = 0
 
     def cook(self):
-        print('Cook')
-        if self.is_idle:
-            raise ValueError("Must begin cooking before advancing cook tick")
-        if self.is_ready:
-            raise ValueError("Cannot cook a container that is already done")
+        if self.is_idle or self.is_ready:
+            return
         if self._cooking_tick < self.cook_time:
             self._cooking_tick += 1
             print("cooking:", self._cooking_tick)
@@ -596,12 +596,15 @@ class ContainerState(object):
     def get_result_food(self):
         # JYP: may need to change to if self.cook_time == 0
         if self.name == "dish" and len(self.ingredients) == 1:
-            result_food = self.ingredients[0]
+            result_food = self._ingredients[0]
         else:
             result_food = FoodState(self.result_food_name, self.position)
+        self.empty_container()
+        return result_food
+
+    def empty_container(self):
         self._ingredients = []
         self._cooking_tick = -1
-        return result_food
 
     def deepcopy(self):
         return ContainerState(self.name, self.position, [ingredient.deepcopy() for ingredient in self._ingredients], self._cooking_tick)
@@ -1184,7 +1187,7 @@ class OvercookedGridworld(object):
         for action, action_set in zip(joint_action, self.get_actions(state)):
             if action not in action_set:
                 raise ValueError("Illegal action %s in state %s" % (action, state))
-        
+
         new_state = state.deepcopy()
 
         # Resolve interacts first
@@ -1226,7 +1229,7 @@ class OvercookedGridworld(object):
 
         for player_idx, (player, action) in enumerate(zip(new_state.players, joint_action)):
 
-            if action != Action.INTERACT:
+            if action != Action.INTERACT and action != Action.ACTIVATE:
                 continue
 
             pos, o = player.position, player.orientation
@@ -1236,108 +1239,127 @@ class OvercookedGridworld(object):
             # NOTE: we always log pickup/drop before performing it, as that's
             # what the logic of determining whether the pickup/drop is useful assumes
 
-            # If player is holding an object
-            if player.has_object():
-                player_object = player.get_object()
-                # If object in front of player, interact with the object there no matter what the platform underneath
-                if new_state.has_object(i_pos):
-                    front_object = new_state.get_object(i_pos)
-                    # player: container, front: ingredient
-                    mydebug(f"*player: {player_object}, front: {front_object}")
-                    if type(player_object) is ContainerState and type(front_object) is FoodState:
-                        mydebug(f"player: container, front: ingredient")
-                        if player_object.can_add(front_object.name):
-                            old_container = player_object.deepcopy()
-                            # Perform
-                            obj = new_state.remove_object(i_pos)
-                            player_object.add_ingredient(obj)
-                            # Reward
-                            shaped_reward[player_idx] += self.reward_shaping_params["PLACEMENT_IN_POT_REW"]
+            if action == Action.INTERACT:
+
+                # If player is holding an object
+                if player.has_object():
+                    player_object = player.get_object()
+                    # If object in front of player, interact with the object there no matter what the platform underneath
+                    if new_state.has_object(i_pos):
+                        front_object = new_state.get_object(i_pos)
+                        # player: container, front: ingredient
+                        mydebug(f"*player: {player_object}, front: {front_object}")
+                        if type(player_object) is ContainerState and type(front_object) is FoodState:
+                            mydebug(f"player: container, front: ingredient")
+                            if player_object.can_add(front_object.name):
+                                old_container = player_object.deepcopy()
+                                # Perform
+                                obj = new_state.remove_object(i_pos)
+                                player_object.add_ingredient(obj)
+                                # Reward
+                                shaped_reward[player_idx] += self.reward_shaping_params["PLACEMENT_IN_POT_REW"]
+                                # Log
+                                # self.log_food_to_container(events_infos, new_state, old_container, front_object, obj.name, player_idx)
+                                # if obj.name in CFG_ALL_INGREDIENTS:
+                                #     events_infos[f'potting_{obj.name}'][player_idx] = True
+                                # JYP: may need to change here to first check if container can be place in the place
+                                obj = player.remove_object()
+                                new_state.add_object(obj, i_pos)
+                        # player: ingredient, front: container
+                        elif type(player_object) is FoodState and type(front_object) is ContainerState:
+                            mydebug(f"player: ingredient, front: container")
+                            if front_object.can_add(player_object.name):
+                                old_container = front_object.deepcopy()
+                                # Perform
+                                obj = player.remove_object()
+                                front_object.add_ingredient(obj)
+                                # Reward
+                                shaped_reward[player_idx] += self.reward_shaping_params["PLACEMENT_IN_POT_REW"]
+                                # Log
+                                # self.log_food_to_container(events_infos, new_state, old_container, front_object, obj.name, player_idx)
+                                # if obj.name in CFG_ALL_INGREDIENTS:
+                                #     events_infos[f'potting_{obj.name}'][player_idx] = True
+                        # player: container, front: container
+                        elif type(player_object) is ContainerState and type(front_object) is ContainerState:
+                            if player_object.is_empty and not front_object.is_empty and front_object.is_ready:
+                                mydebug(f"player: empty, front: {front_object.result_food_name}")
+                                if player_object.can_add(front_object.result_food_name):
+                                    result_food = front_object.get_result_food()
+                                    player_object.add_ingredient(result_food)
+                                    mydebug(f"added {result_food} to {player_object}")
+                            elif front_object.is_empty and not player_object.is_empty and player_object.is_ready:
+                                mydebug(f"player: {player_object.result_food_name}, front: empty")
+                                if front_object.can_add(player_object.result_food_name):
+                                    result_food = player_object.get_result_food()
+                                    front_object.add_ingredient(result_food)
+                                    mydebug(f"added {result_food} to {front_object}")
+                    # If no object in front of player, interact with the platform
+                    else:
+                        if CFG_SYMBOL_TO_TERRAIN[terrain_type] == 'deliver':
+                            if player_object.name in CFG_DELIVERABLE_CONTAINER and player_object.is_ready:
+                                mydebug(f"devliver food")
+                                # Perform
+                                delivery_rew = self.deliver_food(new_state, player, player_object)
+                                # Reward
+                                sparse_reward[player_idx] += delivery_rew
+                                # Log
+                                # events_infos['deliver'][player_idx] = True
+                        elif CFG_SYMBOL_TO_TERRAIN[terrain_type] == 'bin':
+                            if type(player_object) is FoodState:
+                                mydebug(f"throw away {player_object}")
+                                player.remove_object()
+                            elif type(player_object) is ContainerState:
+                                mydebug(f"empty {player_object}")
+                                player_object.empty_container()
+                        elif CFG_SYMBOL_TO_TERRAIN[terrain_type] != 'floor':
+                            obj_name = player_object.name
+                            mydebug(f"place {player_object}")
                             # Log
-                            # self.log_food_to_container(events_infos, new_state, old_container, front_object, obj.name, player_idx)
-                            # if obj.name in CFG_ALL_INGREDIENTS:
-                            #     events_infos[f'potting_{obj.name}'][player_idx] = True
-                            # JYP: may need to change here to first check if container can be place in the place
-                            obj = player.remove_object()
-                            new_state.add_object(obj, i_pos)
-                    # player: ingredient, front: container
-                    elif type(player_object) is FoodState and type(front_object) is ContainerState:
-                        mydebug(f"player: ingredient, front: container")
-                        if front_object.can_add(player_object.name):
-                            old_container = front_object.deepcopy()
+                            # self.log_object_drop(events_infos, new_state, obj_name, pot_states, player_idx)
                             # Perform
-                            obj = player.remove_object()
-                            front_object.add_ingredient(obj)
-                            # Reward
-                            shaped_reward[player_idx] += self.reward_shaping_params["PLACEMENT_IN_POT_REW"]
-                            # Log
-                            # self.log_food_to_container(events_infos, new_state, old_container, front_object, obj.name, player_idx)
-                            # if obj.name in CFG_ALL_INGREDIENTS:
-                            #     events_infos[f'potting_{obj.name}'][player_idx] = True
-                    # player: container, front: container
-                    elif type(player_object) is ContainerState and type(front_object) is ContainerState:
-                        if player_object.is_empty and not front_object.is_empty and front_object.is_ready:
-                            mydebug(f"player: empty, front: full")
-                            if player_object.can_add(front_object.result_food_name):
-                                result_food = front_object.get_result_food()
-                                player_object.add_ingredient(result_food)
-                        elif front_object.is_empty and not player_object.is_empty and player_object.is_ready:
-                            mydebug(f"player: full, front: empty")
-                            if front_object.can_add(player_object.result_food_name):
-                                result_food = player_object.get_result_food()
-                                front_object.add_ingredient(result_food)
-                # If no object in front of player, interact with the platform
+                            new_state.add_object(player.remove_object(), i_pos)
+                # If player is not holding an object
                 else:
-                    if CFG_SYMBOL_TO_TERRAIN[terrain_type] == 'deliver':
-                        if player_object.name in CFG_DELIVERABLE_CONTAINER and player_object.is_ready:
-                            mydebug(f"devliver food")
-                            # Perform
-                            delivery_rew = self.deliver_food(new_state, player, player_object.get_result_food())
-                            # Reward
-                            sparse_reward[player_idx] += delivery_rew
+                    # If object in front of player, pick up the object
+                    if new_state.has_object(i_pos):
+                        # Log
+                        obj_name = new_state.get_object(i_pos).name
+                        # self.log_object_pick(events_infos, new_state, obj_name, pot_states, player_idx)
+                        # Perform
+                        obj = new_state.remove_object(i_pos)
+                        player.set_object(obj)
+                        mydebug(f"pick up {obj}")
+                    # If no object in front of player, interact with the platform
+                    else:
+                        # Pick up an ingredient from the box
+                        if CFG_SYMBOL_TO_TERRAIN[terrain_type] in CFG_ALL_RAWFOOD:
+                            mydebug(f"pick up {CFG_SYMBOL_TO_TERRAIN[terrain_type]}")
                             # Log
-                            # events_infos['deliver'][player_idx] = True
-                    elif CFG_SYMBOL_TO_TERRAIN[terrain_type] != 'floor':
-                        obj_name = player_object.name
-                        mydebug(f"place {player_object}")
-                        # Log
-                        # self.log_object_drop(events_infos, new_state, obj_name, pot_states, player_idx)
-                        # Perform
-                        new_state.add_object(player.remove_object(), i_pos)
-            # If player is not holding an object
-            else:
-                # If object in front of player, pick up the object
-                if new_state.has_object(i_pos):
-                    # Log
-                    obj_name = new_state.get_object(i_pos).name
-                    # self.log_object_pick(events_infos, new_state, obj_name, pot_states, player_idx)
-                    # Perform
-                    obj = new_state.remove_object(i_pos)
-                    player.set_object(obj)
-                    mydebug(f"pick up {obj}")
-                # If no object in front of player, interact with the platform
-                else:
-                    # Pick up an ingredient from the box
-                    if CFG_SYMBOL_TO_TERRAIN[terrain_type] in CFG_ALL_RAWFOOD:
-                        mydebug(f"pick up {CFG_SYMBOL_TO_TERRAIN[terrain_type]}")
-                        # Log
-                        # self.log_object_pick(events_infos, new_state, CFG_SYMBOL_TO_TERRAIN[terrain_type], pot_states, player_idx)
-                        # Perform
-                        new_ing = FoodState(CFG_SYMBOL_TO_TERRAIN[terrain_type], pos)
-                        player.set_object(new_ing)
-                    # Pick up a dish from the box
-                    elif CFG_SYMBOL_TO_TERRAIN[terrain_type] == 'dish':
-                        mydebug(f"pick up plate")
-                        # Reward
-                        # JYP: give this reward all the time instead of checking the if statement
-                        # if self.is_dish_pick_useful(new_state, pot_states):
-                        shaped_reward[player_idx] += self.reward_shaping_params["DISH_PICKUP_REWARD"]
-                        # Log
-                        # self.log_object_pick(events_infos, new_state, "dish", pot_states, player_idx)
-                        # Perform
-                        # JYP : better to remove the cooking_tick and do it some other way.
-                        new_cont = ContainerState('dish', pos)
-                        player.set_object(new_cont)
+                            # self.log_object_pick(events_infos, new_state, CFG_SYMBOL_TO_TERRAIN[terrain_type], pot_states, player_idx)
+                            # Perform
+                            new_ing = FoodState(CFG_SYMBOL_TO_TERRAIN[terrain_type], pos)
+                            player.set_object(new_ing)
+                        # Pick up a dish from the box
+                        elif CFG_SYMBOL_TO_TERRAIN[terrain_type] == 'dish':
+                            mydebug(f"pick up plate")
+                            # Reward
+                            # JYP: give this reward all the time instead of checking the if statement
+                            # if self.is_dish_pick_useful(new_state, pot_states):
+                            shaped_reward[player_idx] += self.reward_shaping_params["DISH_PICKUP_REWARD"]
+                            # Log
+                            # self.log_object_pick(events_infos, new_state, "dish", pot_states, player_idx)
+                            # Perform
+                            # JYP : better to remove the cooking_tick and do it some other way.
+                            new_cont = ContainerState('dish', pos)
+                            player.set_object(new_cont)
+            
+            elif action == Action.ACTIVATE:
+                if not player.has_object() and new_state.has_object(i_pos):
+                    obj = new_state.get_object(i_pos)
+                    activated_objects = CFG_STATION_INFO.get(CFG_SYMBOL_TO_TERRAIN[terrain_type], [])
+                    if type(obj) is ContainerState and obj.is_idle and not obj.is_empty and obj.name in activated_objects:
+                        mydebug(f"turn on {CFG_SYMBOL_TO_TERRAIN[terrain_type]} with object {obj}")
+                        obj.begin_cooking()
 
         return sparse_reward, shaped_reward
 
@@ -1370,17 +1392,13 @@ class OvercookedGridworld(object):
 
             return value
 
-    def deliver_food(self, state, player, food):
+    def deliver_food(self, state, player, dish):
         """
         Deliver food, and get reward if there is no order list
         or if the type of the delivered food matches the next order.
         """
-        # JYP check if this assert isn't needed
-        # assert food.name == 'soup', "Tried to deliver something that wasn't soup"
-        assert food.is_ready, "Tried to deliever soup that isn't ready"
         player.remove_object()
-
-        return self.get_recipe_value(state, food.recipe)
+        return self.get_recipe_value(state, dish.recipe)
 
     def resolve_movement(self, state, joint_action):
         """Resolve player movement and deal with possible collisions"""
@@ -1414,11 +1432,17 @@ class OvercookedGridworld(object):
             
     def step_environment_effects(self, state):
         state.timestep += 1
-        for obj in state.objects.values():
-            if obj.name in CFG_ALL_CONTAINERS and obj.is_cooking:
-                terrain_type = self.get_terrain_type_at_pos(obj.position)
-                if CFG_CONTAINER_INFO[obj.name].get('activate_on', None) == CFG_SYMBOL_TO_TERRAIN[terrain_type]:
-                    obj.cook()
+        # for obj in state.objects.values():
+        #     if obj.name in CFG_ALL_CONTAINERS and obj.is_cooking:
+        #         terrain_type = self.get_terrain_type_at_pos(obj.position)
+        #         if CFG_CONTAINER_INFO[obj.name].get('activate_on', None) == CFG_SYMBOL_TO_TERRAIN[terrain_type]:
+        #             obj.cook()
+        for station, activate_objects in CFG_STATION_INFO.items():
+            for pos in self.get_terrain_locations(station):
+                if state.has_object(pos):
+                    obj = state.get_object(pos)
+                    if obj.name in activate_objects and obj.is_cooking and type(obj) is ContainerState:
+                        obj.cook()
 
     def _handle_collisions(self, old_positions, new_positions):
         """If agents collide, they stay at their old locations"""
@@ -1495,6 +1519,7 @@ class OvercookedGridworld(object):
 
     @property
     def num_containers(self):
+        assert False
         return len(self.get_terrain_locations('stove'))
 
     def get_container_states(self, state):
