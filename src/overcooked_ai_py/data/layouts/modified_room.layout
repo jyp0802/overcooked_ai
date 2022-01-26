@@ -5,9 +5,5 @@
                 XDX_X""",
     "start_bonus_orders": [],
     "start_all_orders" : ["onion", "onionsoup", "tomato"],
-    "rew_shaping_params": None,
-    "onion_ingr_value" : 10,
-    "onionsoup_ingr_value" : 30,
-    "tomato_ingr_value" : 10,
-    "tomatosoup_ingr_value" : 30
+    "rew_shaping_params": None
 }

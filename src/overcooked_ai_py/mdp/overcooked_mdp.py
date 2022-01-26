@@ -371,10 +371,10 @@ class Recipe:
         return cls(**obj_dict)
 
     @classmethod
-    def get_result_food_name(cls, ingredient_names, container_name):
+    def cooked_food_name(cls, ingredient_names, container_name):
         ingredient_str = ", ".join(sorted(ingredient_names))
         if (ingredient_str, container_name) not in CFG_RECIPE_12_3:
-            return None
+            return "trash"
         return CFG_RECIPE_12_3[(ingredient_str, container_name)]
         
 
@@ -536,15 +536,6 @@ class ContainerState(object):
             self._recipe = Recipe(self.ingredients)
         return self._recipe
 
-    @property
-    def result_food_name(self):
-        if not self.is_ready:
-            None
-        # JYP: may need to change to if self.cook_time == 0
-        if self.name == "dish" and len(self.ingredients) == 1:
-            return self.ingredients[0].name
-        return Recipe.get_result_food_name(self.ingredients, self.name)
-
     def is_valid(self):
         if not self.name in CFG_ALL_CONTAINERS:
             return False
@@ -592,16 +583,20 @@ class ContainerState(object):
             return
         if self._cooking_tick < self.cook_time:
             self._cooking_tick += 1
-            mydebug(f"cooking:{self._cooking_tick}")
+            if self._cooking_tick == self.cook_time:
+                mydebug("Cook done")
+                cooked_food_name = Recipe.cooked_food_name(self.ingredients, self.name)
+                self._ingredients = [FoodState(cooked_food_name, self.position)]
 
-    def get_result_food(self):
-        # JYP: may need to change to if self.cook_time == 0
-        if self.name == "dish" and len(self.ingredients) == 1:
-            result_food = self._ingredients[0]
-        else:
-            result_food = FoodState(self.result_food_name, self.position)
+    def get_cooked_food(self):
+        assert len(self._ingredients) == 1
+        return self._ingredients[0]
+
+    def remove_cooked_food(self):
+        "JYP: need to fix when multiple foods can be added to a plate"
+        food = self.get_cooked_food()
         self.empty_container()
-        return result_food
+        return food
 
     def empty_container(self):
         self._ingredients = []
@@ -616,6 +611,7 @@ class ContainerState(object):
         info_dict['position'] = self.position
         ingrdients_dict = [ingredient.to_dict() for ingredient in self._ingredients]
         info_dict['_ingredients'] = ingrdients_dict
+        info_dict['ingredient_names'] = "_".join(sorted(self.ingredients))
         info_dict['cooking_tick'] = self._cooking_tick
         info_dict['is_cooking'] = self.is_cooking
         info_dict['is_ready'] = self.is_ready
@@ -1289,17 +1285,17 @@ class OvercookedGridworld(object):
                         # player: container, front: container
                         elif type(player_object) is ContainerState and type(front_object) is ContainerState:
                             if player_object.is_empty and not front_object.is_empty and front_object.is_ready:
-                                mydebug(f"player: empty, front: {front_object.result_food_name}")
-                                if player_object.can_add(front_object.result_food_name):
-                                    result_food = front_object.get_result_food()
-                                    player_object.add_ingredient(result_food)
-                                    mydebug(f"added {result_food} to {player_object}")
+                                mydebug(f"player: empty, front: {front_object.get_cooked_food().name}")
+                                if player_object.can_add(front_object.get_cooked_food().name):
+                                    food = front_object.remove_cooked_food()
+                                    player_object.add_ingredient(food)
+                                    mydebug(f"added {food} to {player_object}")
                             elif front_object.is_empty and not player_object.is_empty and player_object.is_ready:
-                                mydebug(f"player: {player_object.result_food_name}, front: empty")
-                                if front_object.can_add(player_object.result_food_name):
-                                    result_food = player_object.get_result_food()
-                                    front_object.add_ingredient(result_food)
-                                    mydebug(f"added {result_food} to {front_object}")
+                                mydebug(f"player: {player_object.get_cooked_food().name}, front: empty")
+                                if front_object.can_add(player_object.get_cooked_food().name):
+                                    food = player_object.remove_cooked_food()
+                                    front_object.add_ingredient(food)
+                                    mydebug(f"added {food} to {front_object}")
                     # If no object in front of player, interact with the platform
                     else:
                         if CFG_SYMBOL_TO_TERRAIN[terrain_type] == 'deliver':

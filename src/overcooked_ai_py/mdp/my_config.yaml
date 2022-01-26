@@ -32,7 +32,7 @@ container_info:
     can_add: ["onionsoup", "tomatosoup", "oniontomatosoup"]
   pot:
     cook_time: 30
-    max_ingredients: 2
+    max_ingredients: 3
     can_add: ["tomato", "onion"]
     activate_on: "stove"
 
