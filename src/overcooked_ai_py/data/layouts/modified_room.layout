@@ -1,12 +1,13 @@
 {
     "grid":  """XXSXX
                 O   T
-                X12 B
+                X1  B
                 XDX_X""",
     "start_bonus_orders": [],
-    "start_all_orders" : [
-        { "ingredients" : ["tomato1soup"]},
-        { "ingredients" : ["tomato2soup"]}
-    ],
-    "rew_shaping_params": None
+    "start_all_orders" : ["onion", "onionsoup", "tomato"],
+    "rew_shaping_params": None,
+    "onion_ingr_value" : 10,
+    "onionsoup_ingr_value" : 30,
+    "tomato_ingr_value" : 10,
+    "tomatosoup_ingr_value" : 30
 }

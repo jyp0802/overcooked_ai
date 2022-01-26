@@ -191,7 +191,7 @@ class Recipe:
             return self._delivery_reward
         if self._value_mapping and self in self._value_mapping:
             return self._value_mapping[self]
-        if all(v is None for v in self._ingredient_value.values()):
+        if all(not v is None for v in self._ingredient_value.values()):
             all_value = 0
             stack = self._ingredients.copy()
             while stack:
@@ -240,13 +240,14 @@ class Recipe:
                 new_ingredients = [*self.ingredients, ingredient]
                 new_recipe = Recipe(new_ingredients)
                 neighbors.append(new_recipe)
-        for sub_len in range(len(self.ingredients)+1):
+        for sub_len in range(1, len(self.ingredients)+1):
             for sub_ingr in itertools.combinations(self.ingredients, sub_len):
-                if sub_ingr in CFG_RECIPE_1_23:
+                sub_ingr_str = ", ".join(sub_ingr)
+                if sub_ingr_str in CFG_RECIPE_1_23:
                     new_ingr = list(self.ingredients)
                     for x in sub_ingr:
                         new_ingr.remove(x)
-                    new_ingr += CFG_RECIPE_1_23[sub_ingr][2]
+                    new_ingr.append(CFG_RECIPE_1_23[sub_ingr_str][-1])
                     new_recipe = Recipe(new_ingr)
                     neighbors.append(new_recipe)
         return neighbors
@@ -538,7 +539,7 @@ class ContainerState(object):
     @property
     def result_food_name(self):
         if not self.is_ready:
-            raise ValueError("Cooking has not finished yet")
+            None
         # JYP: may need to change to if self.cook_time == 0
         if self.name == "dish" and len(self.ingredients) == 1:
             return self.ingredients[0].name
@@ -591,7 +592,7 @@ class ContainerState(object):
             return
         if self._cooking_tick < self.cook_time:
             self._cooking_tick += 1
-            print("cooking:", self._cooking_tick)
+            mydebug(f"cooking:{self._cooking_tick}")
 
     def get_result_food(self):
         # JYP: may need to change to if self.cook_time == 0
@@ -1024,6 +1025,12 @@ class OvercookedGridworld(object):
         mdp_config["terrain"] = layout_grid
         mdp_config["start_player_positions"] = player_positions
 
+        if "start_all_orders" in mdp_config:
+            mdp_config["start_all_orders"] = [{"ingredients": [elem]} for elem in mdp_config["start_all_orders"]]
+
+        if "bonus_all_orders" in mdp_config:
+            mdp_config["bonus_all_orders"] = [{"ingredients": [elem]} for elem in mdp_config["bonus_all_orders"]]
+
         for k, v in params_to_overwrite.items():
             curr_val = mdp_config.get(k, None)
             if debug:
@@ -1370,6 +1377,9 @@ class OvercookedGridworld(object):
         The player receives 0 if recipe not in all_orders, receives base value * order_bonus
         if recipe is in bonus orders, and receives base value otherwise
         """
+        if not recipe:
+            return 0
+
         if not discounted:
             if not recipe in state.all_orders:
                 return 0
@@ -1385,9 +1395,10 @@ class OvercookedGridworld(object):
             for ingredient in prev_ingredients:
                 missing_ingredients.remove(ingredient)
 
-            value = potential_params['gamma']**recipe.time * self.get_recipe_value(state, recipe, discounted=False)
+            gamma = potential_params['gamma']
+            value = gamma**recipe.time * self.get_recipe_value(state, recipe, discounted=False)
 
-            for elem in CFG_ALL_INGREDIENTS:
+            for elem in CFG_ALL_RAWFOOD:
                 value *= gamma**(potential_params[f'pot_{elem}_steps'] * missing_ingredients.count(elem))
 
             return value
@@ -1532,8 +1543,8 @@ class OvercookedGridworld(object):
         }
         NOTE: all returned containers are just positions
         """
-        container_states_dict = defaultdict(lambda: defaultdict(list))
-        all_objects = state.all_objects_by_type()
+        container_states_dict = defaultdict(list)
+        all_objects = state.all_objects_by_type
         all_containers = [obj for cont in CFG_ALL_CONTAINERS for obj in all_objects[cont]]
 
         for container in all_containers:
