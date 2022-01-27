@@ -1,43 +1,50 @@
 raw_foods: ["tomato", "onion"]
-containers: ["dish", "pot"]
-deliverable_containers: ["dish"]
-dispensers: ["tomato", "onion", "dish"]
-
-terrains: ["tomato", "onion", "dish", "deliver", "stove", "counter", "bin"]
-
-default_objects:
-  stove: "pot"
-
 max_num_ingredients: 3
+
+terrain_info:
+  tomato:
+    symbol: "T"
+    placeable: true
+    dispenser: true
+  onion:
+    symbol: "O"
+    placeable: true
+    dispenser: true
+  dish:
+    symbol: "D"
+    placeable: true
+    dispenser: true
+  deliver:
+    symbol: "_"
+  stove:
+    symbol: "S"
+    placeable: true
+    default_object: "pot"
+    activate: ["pot"]
+  counter:
+    symbol: "X"
+    placeable: true
+  bin:
+    symbol: "B"
+  floor:
+    symbol: " "
 
 object_representation:
   tomato: "†"
   onion: "ø"
   dish: "ⓓ"
   pot: "ⓟ"
-terrain_to_symbol:
-  tomato: "T"
-  onion: "O"
-  dish: "D"
-  deliver: "_"
-  stove: "S"
-  counter: "X"
-  bin: "B"
-  floor: " "
 
 container_info:
   dish:
     cook_time: 0
     max_ingredients: 1
     can_add: ["onionsoup", "tomatosoup", "oniontomatosoup"]
+    deliverable: true
   pot:
     cook_time: 30
     max_ingredients: 3
     can_add: ["tomato", "onion"]
-    activate_on: "stove"
-
-station_info:
-  stove: ["pot"]
 
 recipe_info: [
   ["onion", "pot", "onionsoup"],
@@ -45,6 +52,8 @@ recipe_info: [
   ["tomato", "pot", "tomatosoup"],
   ["onion, tomato", "pot", "oniontomatosoup"],
 ]
+
+
 
 
 BASE_REW_SHAPING_PARAMS:

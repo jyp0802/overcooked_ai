@@ -36,43 +36,46 @@ serving:
 - plate, sink
 '''
 
+    #######################
+    # GET ALL CONFIG INFO #
+    #######################
+
 cur_file_dir = os.path.dirname(os.path.abspath(__file__))
 config = yaml.safe_load(open(os.path.join(cur_file_dir, 'my_config.yaml'), 'r'))
 
+#### Terrain
+CFG_TERRAIN_INFO = config['terrain_info']
+CFG_STATION_INFO = {terrain: info['activate'] for terrain, info in CFG_TERRAIN_INFO.items() if 'activate' in info}
 
-CFG_CONTAINER_INFO = config['container_info']
-CFG_STATION_INFO = config['station_info']
-CFG_RECIPE_INFO = config['recipe_info']
-CFG_RECIPE_12_3 = {(a, b): c for (a, b, c) in CFG_RECIPE_INFO}
-CFG_RECIPE_3_12 = {c: (a, b) for (a, b, c) in CFG_RECIPE_INFO}
+#### Recipes
+_CFG_RECIPE_INFO = config['recipe_info']
 # JYP: Need to fix for the case where the same ingredients lead
 # to different outcomes depending on the container used.
-CFG_RECIPE_1_23 = {a: (b, c) for (a, b, c) in CFG_RECIPE_INFO}
+CFG_RECIPE_1_23 = {a: (b, c) for (a, b, c) in _CFG_RECIPE_INFO}
+CFG_RECIPE_12_3 = {(a, b): c for (a, b, c) in _CFG_RECIPE_INFO}
+CFG_RECIPE_3_12 = {c: (a, b) for (a, b, c) in _CFG_RECIPE_INFO}
 
+#### Objects
 CFG_ALL_RAWFOOD = config['raw_foods']
-CFG_ALL_INGREDIENTS = list(set(CFG_ALL_RAWFOOD + list(CFG_RECIPE_3_12.keys())))
-CFG_NUM_INGREDIENT_TYPE = len(CFG_ALL_INGREDIENTS)
-CFG_MAX_NUM_INGREDIENTS = config['max_num_ingredients']
-
-CFG_ALL_CONTAINERS = config['containers']
-CFG_DELIVERABLE_CONTAINER = config['deliverable_containers']
-
-CFG_ALL_DISPENSERS = config['dispensers']
-
+CFG_CONTAINER_INFO = config['container_info']
+CFG_ALL_CONTAINERS = list(CFG_CONTAINER_INFO.keys())
 CFG_ALL_OBJECTS = CFG_ALL_RAWFOOD + CFG_ALL_CONTAINERS
 
-CFG_ALL_TERRAINS = config['terrains']
+#### Ingredients
+CFG_MAX_NUM_INGREDIENTS = config['max_num_ingredients']
+CFG_ALL_INGREDIENTS = list(set(CFG_ALL_RAWFOOD + list(CFG_RECIPE_3_12.keys())))
+CFG_NUM_INGREDIENT_TYPE = len(CFG_ALL_INGREDIENTS)
 
-CFG_DEFAULT_OBJECTS = config['default_objects']
-
+#### Representations
 CFG_STR_REP = config['object_representation']
+CFG_TERRAIN_TO_SYMBOL = {k: v["symbol"] for k, v in CFG_TERRAIN_INFO.items()}
+CFG_SYMBOL_TO_TERRAIN = {v["symbol"]: k for k, v in CFG_TERRAIN_INFO.items()}
 
-CFG_TERRAIN_TO_SYMBOL = config['terrain_to_symbol']
-CFG_SYMBOL_TO_TERRAIN = {v: k for k, v in CFG_TERRAIN_TO_SYMBOL.items()}
-
+#### Default values
 CFG_DEFAULT_RECIPE_VALUE = config['default_recipe_value']
 CFG_DEFAULT_RECIPE_TIME = config['default_recipe_time']
 
+#### Events
 EVENT_TYPES = []
 for elem in CFG_ALL_OBJECTS:
     EVENT_TYPES += [f"{elem}_pick", f"{elem}_drop", f"useful_{elem}_pick", f"useful_{elem}_drop"]
@@ -1094,14 +1097,16 @@ class OvercookedGridworld(object):
                 raise ValueError('Invalid action')
 
     def add_default_objects(self, state):
-        for def_loc, def_obj in CFG_DEFAULT_OBJECTS.items():
-            for def_pos in self.get_terrain_locations(def_loc):
-                if def_obj in CFG_ALL_CONTAINERS:
-                    state.add_object(ContainerState(def_obj, def_pos))
-                elif def_obj in CFG_ALL_RAWFOOD:
-                    state.add_object(FoodState(def_obj, def_pos))
-                else:
-                    raise ValueError('Invalid default object')
+        for terrain, info in CFG_TERRAIN_INFO.items():
+            if "default_object" in info:
+                def_obj = info["default_object"]
+                for def_pos in self.get_terrain_locations(terrain):
+                    if def_obj in CFG_ALL_CONTAINERS:
+                        state.add_object(ContainerState(def_obj, def_pos))
+                    elif def_obj in CFG_ALL_RAWFOOD:
+                        state.add_object(FoodState(def_obj, def_pos))
+                    else:
+                        raise ValueError('Invalid default object')
 
     def get_standard_start_state(self):
         if self.start_state:
@@ -1123,7 +1128,6 @@ class OvercookedGridworld(object):
         (not soup deliveries).
         """
         events_infos = { event : [False] * self.num_players for event in EVENT_TYPES }
-        assert not self.is_terminal(state), "Trying to find successor of a terminal state: {}".format(state)
         for action, action_set in zip(joint_action, self.get_actions(state)):
             if action not in action_set:
                 raise ValueError("Illegal action %s in state %s" % (action, state))
@@ -1175,6 +1179,7 @@ class OvercookedGridworld(object):
             pos, o = player.position, player.orientation
             i_pos = Action.move_in_direction(pos, o)
             terrain_type = self.get_terrain_type_at_pos(i_pos)
+            terrain_name = CFG_SYMBOL_TO_TERRAIN[terrain_type]
 
             # NOTE: we always log pickup/drop before performing it, as that's
             # what the logic of determining whether the pickup/drop is useful assumes
@@ -1235,8 +1240,8 @@ class OvercookedGridworld(object):
                                     mydebug(f"added {food} to {front_object}")
                     # If no object in front of player, interact with the platform
                     else:
-                        if CFG_SYMBOL_TO_TERRAIN[terrain_type] == 'deliver':
-                            if player_object.name in CFG_DELIVERABLE_CONTAINER and player_object.is_ready:
+                        if terrain_name == "deliver":
+                            if player_object.is_ready and CFG_CONTAINER_INFO[player_object.name].get("deliverable"):
                                 mydebug(f"devliver food")
                                 # Perform
                                 delivery_rew = self.deliver_food(new_state, player, player_object)
@@ -1244,14 +1249,14 @@ class OvercookedGridworld(object):
                                 sparse_reward[player_idx] += delivery_rew
                                 # Log
                                 # events_infos['deliver'][player_idx] = True
-                        elif CFG_SYMBOL_TO_TERRAIN[terrain_type] == 'bin':
+                        elif terrain_name == "bin":
                             if type(player_object) is FoodState:
                                 mydebug(f"throw away {player_object}")
                                 player.remove_object()
                             elif type(player_object) is ContainerState:
                                 mydebug(f"empty {player_object}")
                                 player_object.empty_container()
-                        elif CFG_SYMBOL_TO_TERRAIN[terrain_type] != 'floor':
+                        elif CFG_TERRAIN_INFO[terrain_name].get("placeable"):
                             obj_name = player_object.name
                             mydebug(f"place {player_object}")
                             # Log
@@ -1269,41 +1274,25 @@ class OvercookedGridworld(object):
                         obj = new_state.remove_object(i_pos)
                         player.set_object(obj)
                         mydebug(f"pick up {obj}")
-                    # If no object in front of player, interact with the platform
-                    else:
-                        # Pick up an ingredient from the box
-                        if CFG_SYMBOL_TO_TERRAIN[terrain_type] in CFG_ALL_RAWFOOD:
-                            mydebug(f"pick up {CFG_SYMBOL_TO_TERRAIN[terrain_type]}")
-                            # Log
-                            # self.log_object_pick(events_infos, new_state, CFG_SYMBOL_TO_TERRAIN[terrain_type], pot_states, player_idx)
-                            # Perform
-                            new_ing = FoodState(CFG_SYMBOL_TO_TERRAIN[terrain_type], pos)
-                            player.set_object(new_ing)
-                        # Pick up a dish from the box
-                        elif CFG_SYMBOL_TO_TERRAIN[terrain_type] == 'dish':
-                            mydebug(f"pick up plate")
-                            # Reward
-                            # JYP: give this reward all the time instead of checking the if statement
-                            # if self.is_dish_pick_useful(new_state, pot_states):
-                            shaped_reward[player_idx] += self.reward_shaping_params["DISH_PICKUP_REWARD"]
-                            # Log
-                            # self.log_object_pick(events_infos, new_state, "dish", pot_states, player_idx)
-                            # Perform
-                            # JYP : better to remove the cooking_tick and do it some other way.
-                            new_cont = ContainerState('dish', pos)
-                            player.set_object(new_cont)
+                    # If no object in front of player, pickup from the dispenser
+                    elif CFG_TERRAIN_INFO[terrain_name].get("dispenser"):
+                        mydebug(f"pick up {terrain_name}")
+                        if terrain_name in CFG_ALL_RAWFOOD:
+                            new_obj = FoodState(terrain_name, pos)
+                        elif terrain_name in CFG_ALL_CONTAINERS:
+                            new_obj = ContainerState(terrain_name, pos)
+                        player.set_object(new_obj)
             
             elif action == Action.ACTIVATE:
-                if not player.has_object() and new_state.has_object(i_pos):
+                if not player.has_object() and new_state.has_object(i_pos) and terrain_name in CFG_STATION_INFO:
                     obj = new_state.get_object(i_pos)
-                    activated_objects = CFG_STATION_INFO.get(CFG_SYMBOL_TO_TERRAIN[terrain_type], [])
-                    if type(obj) is ContainerState and obj.is_idle and not obj.is_empty and obj.name in activated_objects:
-                        mydebug(f"turn on {CFG_SYMBOL_TO_TERRAIN[terrain_type]} with object {obj}")
+                    if type(obj) is ContainerState and obj.is_idle and not obj.is_empty and obj.name in CFG_STATION_INFO[terrain_name]:
+                        mydebug(f"turn on {terrain_name} with object {obj}")
                         obj.begin_cooking()
 
         return sparse_reward, shaped_reward
 
-    def get_recipe_value(self, state, recipe, discounted=False, base_recipe=None, }):
+    def get_recipe_value(self, state, recipe, discounted=False, base_recipe=None):
         """
         Return the reward the player should receive for delivering this recipe
 
@@ -1448,6 +1437,9 @@ class OvercookedGridworld(object):
             adj_pos = Action.move_in_direction(pos, d)
             adj_feats.append((adj_pos, self.get_terrain_type_at_pos(adj_pos)))
         return adj_feats
+
+    def get_station_terrain_names(self):
+        return list(CFG_STATION_INFO.keys())
 
     def get_terrain_type_at_pos(self, pos):
         x, y = pos
@@ -1654,7 +1646,7 @@ class OvercookedGridworld(object):
         """Featurizes a OvercookedState object into a stack of boolean masks that are easily readable by a CNN"""
         assert self.num_players == 2, "Functionality has to be added to support encondings for > 2 players"
         assert type(debug) is bool
-        terrain_location_features = [f"{elem}_terrain_loc" for elem in CFG_ALL_TERRAINS]
+        terrain_location_features = [f"{terrain}_terrain_loc" for terrain in CFG_TERRAIN_INFO]
         object_location_features = [f"{elem}_object_loc" for elem in CFG_ALL_OBJECTS]
         object_state_features = [f"{ingredient}_in_{container}" for ingredient in CFG_ALL_INGREDIENTS for container in CFG_ALL_CONTAINERS] + \
                                 [elem for sublist in [[f"{container}_time_left", f"{container}_done"] for container in CFG_ALL_CONTAINERS] for elem in sublist]
@@ -1680,9 +1672,9 @@ class OvercookedGridworld(object):
             if horizon - overcooked_state.timestep < 40:
                 state_mask_dict["urgency"] = np.ones(self.shape)
 
-            for elem in CFG_ALL_TERRAINS:
-                for loc in self.get_terrain_locations(elem):
-                    state_mask_dict[f"{elem}_terrain_loc"][loc] = 1
+            for terrain in CFG_TERRAIN_INFO:
+                for loc in self.get_terrain_locations(terrain):
+                    state_mask_dict[f"{terrain}_terrain_loc"][loc] = 1
 
             # PLAYER LAYERS
             for i, player in enumerate(overcooked_state.players):
