@@ -283,16 +283,16 @@ class GreedyHumanModel(Agent):
         return actions_and_infos_n
 
     def action(self, state):
-        possible_motion_goals = self.ml_action(state)
+        possible_motion_goals, end_action = self.ml_action(state)
 
         # Once we have identified the motion goals for the medium
         # level action we want to perform, select the one with lowest cost
         start_pos_and_or = state.players_pos_and_or[self.agent_index]
 
-        chosen_goal, chosen_action, action_probs = self.choose_motion_goal(start_pos_and_or, possible_motion_goals)
+        chosen_goal, chosen_action, action_probs = self.choose_motion_goal(start_pos_and_or, possible_motion_goals, end_action)
 
         if self.ll_boltzmann_rational and chosen_goal[0] == start_pos_and_or[0]:
-            chosen_action, action_probs = self.boltzmann_rational_ll_action(start_pos_and_or, chosen_goal)
+            chosen_action, action_probs = self.boltzmann_rational_ll_action(start_pos_and_or, chosen_goal, end_action)
 
         if self.auto_unstuck:
             # HACK: if two agents get stuck, select an action at random that would
@@ -321,20 +321,20 @@ class GreedyHumanModel(Agent):
             self.prev_state = state
         return chosen_action, {"action_probs": action_probs}
 
-    def choose_motion_goal(self, start_pos_and_or, motion_goals):
+    def choose_motion_goal(self, start_pos_and_or, motion_goals, end_action):
         """
         For each motion goal, consider the optimal motion plan that reaches the desired location.
         Based on the plan's cost, the method chooses a motion goal (either boltzmann rationally
         or rationally), and returns the plan and the corresponding first action on that plan.
         """
         if self.hl_boltzmann_rational:
-            possible_plans = [self.mlam.motion_planner.get_plan(start_pos_and_or, goal) for goal in motion_goals]
+            possible_plans = [self.mlam.motion_planner.get_plan(start_pos_and_or, goal, end_action) for goal in motion_goals]
             plan_costs = [plan[2] for plan in possible_plans]
             goal_idx, action_probs = self.get_boltzmann_rational_action_idx(plan_costs, self.hl_temperature)
             chosen_goal = motion_goals[goal_idx]
             chosen_goal_action = possible_plans[goal_idx][0][0]
         else:
-            chosen_goal, chosen_goal_action = self.get_lowest_cost_action_and_goal(start_pos_and_or, motion_goals)
+            chosen_goal, chosen_goal_action = self.get_lowest_cost_action_and_goal(start_pos_and_or, motion_goals, end_action)
             action_probs = self.a_probs_from_action(chosen_goal_action)
         return chosen_goal, chosen_goal_action, action_probs
 
@@ -345,7 +345,7 @@ class GreedyHumanModel(Agent):
         action_idx = np.random.choice(len(costs), p=softmax_probs)
         return action_idx, softmax_probs
 
-    def get_lowest_cost_action_and_goal(self, start_pos_and_or, motion_goals):
+    def get_lowest_cost_action_and_goal(self, start_pos_and_or, motion_goals, end_action):
         """
         Chooses motion goal that has the lowest cost action plan.
         Returns the motion goal itself and the first action on the plan.
@@ -353,14 +353,14 @@ class GreedyHumanModel(Agent):
         min_cost = np.Inf
         best_action, best_goal = None, None
         for goal in motion_goals:
-            action_plan, _, plan_cost = self.mlam.motion_planner.get_plan(start_pos_and_or, goal)
+            action_plan, _, plan_cost = self.mlam.motion_planner.get_plan(start_pos_and_or, goal, end_action)
             if plan_cost < min_cost:
                 best_action = action_plan[0]
                 min_cost = plan_cost
                 best_goal = goal
         return best_goal, best_action
 
-    def boltzmann_rational_ll_action(self, start_pos_and_or, goal, inverted_costs=False):
+    def boltzmann_rational_ll_action(self, start_pos_and_or, goal, end_action, inverted_costs=False):
         """
         Computes the plan cost to reach the goal after taking each possible low level action.
         Selects a low level action boltzmann rationally based on the one-step-ahead plan costs.
@@ -372,7 +372,7 @@ class GreedyHumanModel(Agent):
         for action in Action.ALL_ACTIONS:
             pos, orient = start_pos_and_or
             new_pos_and_or = self.mdp._move_if_direction(pos, orient, action)
-            _, _, plan_cost = self.mlam.motion_planner.get_plan(new_pos_and_or, goal)
+            _, _, plan_cost = self.mlam.motion_planner.get_plan(new_pos_and_or, goal, end_action)
             sign = (-1) ** int(inverted_costs)
             future_costs.append(sign * plan_cost)
 
@@ -383,13 +383,13 @@ class GreedyHumanModel(Agent):
         """
         Selects a medium level action for the current state.
         Motion goals can be thought of instructions of the form:
-            [do X] at location [Y]
+            do action X on terrain Y while at location Z
 
-        In this method, X (e.g. deliver the soup, pick up an onion, etc) is chosen based on
-        a simple set of greedy heuristics based on the current state.
+        In this method, X (e.g. INTERACT or ACTIVATE) and Y (e.g. onion dispenser, stove)
+        is chosen based on a simple set of greedy heuristics based on the current state.
 
-        Effectively, will return a list of all possible locations Y in which the selected
-        medium level action X can be performed.
+        Effectively, will return a list of all possible locations Z that can access Y
+        and the action X.
         """
         player = state.players[self.agent_index]
         other_player = state.players[1 - self.agent_index]
@@ -453,7 +453,7 @@ class GreedyHumanModel(Agent):
             motion_goals = [mg for mg in motion_goals if self.mlam.motion_planner.is_valid_motion_start_goal_pair(player.pos_and_or, mg)]
             assert len(motion_goals) != 0
 
-        return motion_goals
+        return motion_goals, end_action
 
 class SampleAgent(Agent):
     """ Agent that samples action using the average action_probs across multiple agents

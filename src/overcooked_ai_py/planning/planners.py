@@ -90,7 +90,7 @@ class MotionPlanner(object):
         return mp
 
 
-    def get_plan(self, start_pos_and_or, goal_pos_and_or):
+    def get_plan(self, start_pos_and_or, goal_pos_and_or, end_action):
         """
         Returns pre-computed plan from initial agent position
         and orientation to a goal position and orientation.
@@ -99,7 +99,9 @@ class MotionPlanner(object):
             start_pos_and_or (tuple): starting (pos, or) tuple
             goal_pos_and_or (tuple): goal (pos, or) tuple
         """
-        plan_key = (start_pos_and_or, goal_pos_and_or)
+        if not end_action:
+            end_action = Action.INTERACT
+        plan_key = (start_pos_and_or, goal_pos_and_or, end_action)
         action_plan, pos_and_or_path, plan_cost = self.all_plans[plan_key]
         return action_plan, pos_and_or_path, plan_cost
     
@@ -109,7 +111,7 @@ class MotionPlanner(object):
         interaction action)"""
         assert self.is_valid_motion_start_goal_pair(start_pos_and_or, goal_pos_and_or), \
             "Goal position and orientation were not a valid motion goal"
-        _, _, plan_cost = self.get_plan(start_pos_and_or, goal_pos_and_or)
+        _, _, plan_cost = self.get_plan(start_pos_and_or, goal_pos_and_or, None)
         # Removing interaction cost
         return plan_cost - 1
 
@@ -118,23 +120,23 @@ class MotionPlanner(object):
         all_plans = {}
         valid_pos_and_ors = self.mdp.get_valid_player_positions_and_orientations()
         valid_motion_goals = filter(self.is_valid_motion_goal, valid_pos_and_ors)
-        for start_motion_state, goal_motion_state in itertools.product(valid_pos_and_ors, valid_motion_goals):
-            if not self.is_valid_motion_start_goal_pair(start_motion_state, goal_motion_state):
+        for start_motion_state, goal_motion_state, end_action in itertools.product(valid_pos_and_ors, valid_motion_goals, Action.END_ACTIONS):
+            if not self.is_valid_motion_start_goal_pair(start_motion_state, goal_motion_state, end_action):
                 continue
-            action_plan, pos_and_or_path, plan_cost = self._compute_plan(start_motion_state, goal_motion_state)
-            plan_key = (start_motion_state, goal_motion_state)
+            action_plan, pos_and_or_path, plan_cost = self._compute_plan(start_motion_state, goal_motion_state, end_action)
+            plan_key = (start_motion_state, goal_motion_state, end_action)
             all_plans[plan_key] = (action_plan, pos_and_or_path, plan_cost)
         return all_plans
 
-    def is_valid_motion_start_goal_pair(self, start_pos_and_or, goal_pos_and_or):
-        if not self.is_valid_motion_goal(goal_pos_and_or):
+    def is_valid_motion_start_goal_pair(self, start_pos_and_or, goal_pos_and_or, end_action=None):
+        if not self.is_valid_motion_goal(goal_pos_and_or, end_action):
             return False
         # the valid motion start goal needs to be in the same connected component
         if not self.positions_are_connected(start_pos_and_or, goal_pos_and_or):
             return False
         return True
 
-    def is_valid_motion_goal(self, goal_pos_and_or):
+    def is_valid_motion_goal(self, goal_pos_and_or, end_action=None):
         """Checks that desired single-agent goal state (position and orientation) 
         is reachable and is facing a terrain feature"""
         goal_position, goal_orientation = goal_pos_and_or
@@ -144,21 +146,26 @@ class MotionPlanner(object):
         # Restricting goals to be facing a terrain feature
         pos_of_facing_terrain = Action.move_in_direction(goal_position, goal_orientation)
         facing_terrain_type = self.mdp.get_terrain_type_at_pos(pos_of_facing_terrain)
-        if facing_terrain_type == ' ' or (facing_terrain_type == 'X' and pos_of_facing_terrain not in self.counter_goals):
+        # JYP: let's make it so that counters are always included for possible goals
+        if facing_terrain_type == ' ':# or (facing_terrain_type == 'X' and pos_of_facing_terrain not in self.counter_goals):
             return False
+
+        # If the end action is ACTIVATE, the faced terrain must be activatable
+        if end_action == Action.ACTIVATE and facing_terrain_type not in self.mdp.get_station_terrain_names():
+            return False
+
         return True
 
-    def _compute_plan(self, start_motion_state, goal_motion_state):
+    def _compute_plan(self, start_motion_state, goal_motion_state, end_action):
         """Computes optimal action plan for single agent movement
         
         Args:
             start_motion_state (tuple): starting positions and orientations
             goal_motion_state (tuple): goal positions and orientations
         """
-        assert self.is_valid_motion_start_goal_pair(start_motion_state, goal_motion_state)
+        assert self.is_valid_motion_start_goal_pair(start_motion_state, goal_motion_state, end_action)
         positions_plan = self._get_position_plan_from_graph(start_motion_state, goal_motion_state)
-        action_plan, pos_and_or_path, plan_length = self.action_plan_from_positions(positions_plan, start_motion_state, goal_motion_state)
-        return action_plan, pos_and_or_path, plan_length
+        return self.action_plan_from_positions(positions_plan, start_motion_state, goal_motion_state, end_action)
 
     def positions_are_connected(self, start_pos_and_or, goal_pos_and_or):
         return self.graph_problem.are_in_same_cc(start_pos_and_or, goal_pos_and_or)
@@ -170,10 +177,10 @@ class MotionPlanner(object):
         positions_plan = [state_node[0] for state_node in node_path[1:]]
         return positions_plan
 
-    def action_plan_from_positions(self, position_list, start_motion_state, goal_motion_state):
+    def action_plan_from_positions(self, position_list, start_motion_state, goal_motion_state, end_action):
         """
-        Recovers an action plan reaches the goal motion position and orientation, and executes
-        and interact action.
+        Recovers an action plan that reaches the goal motion position and orientation, and 
+        executes either an interact action or an activate action.
         
         Args:
             position_list (list): list of positions to be reached after the starting position
@@ -207,8 +214,8 @@ class MotionPlanner(object):
             action_plan.append(goal_orientation)
             pos_and_or_path.append((goal_position, goal_orientation))
 
-        # Add interact action
-        action_plan.append(Action.INTERACT)
+        # Add end action
+        action_plan.append(end_action)
         pos_and_or_path.append((goal_position, goal_orientation))
 
         return action_plan, pos_and_or_path, len(action_plan)
@@ -401,87 +408,6 @@ class MediumLevelActionManager(object):
         mlam.save_to_file(final_filepath)
         return mlam
 
-    def joint_ml_actions(self, state):
-        """Determine all possible joint medium level actions for a certain state"""
-        agent1_actions, agent2_actions = tuple(self.get_medium_level_actions(state, player) for player in state.players)
-        joint_ml_actions = list(itertools.product(agent1_actions, agent2_actions))
-        
-        # ml actions are nothing but specific joint motion goals
-        valid_joint_ml_actions = list(filter(lambda a: self.is_valid_ml_action(state, a), joint_ml_actions))
-
-        # HACK: Could cause things to break.
-        # Necessary to prevent states without successors (due to no counters being allowed and no wait actions)
-        # causing A* to not find a solution
-        if len(valid_joint_ml_actions) == 0:
-            agent1_actions, agent2_actions = tuple(self.get_medium_level_actions(state, player, waiting_substitute=True) for player in state.players)
-            joint_ml_actions = list(itertools.product(agent1_actions, agent2_actions))
-            valid_joint_ml_actions = list(filter(lambda a: self.is_valid_ml_action(state, a), joint_ml_actions))
-            if len(valid_joint_ml_actions) == 0:
-                print("WARNING: Found state without valid actions even after adding waiting substitute actions. State: {}".format(state))
-        return valid_joint_ml_actions
-
-    def is_valid_ml_action(self, state, ml_action):
-        return self.joint_motion_planner.is_valid_jm_start_goal_pair(state.players_pos_and_or, ml_action)
-
-    def get_medium_level_actions(self, state, player, waiting_substitute=False):
-        """
-        Determine valid medium level actions for a player.
-        
-        Args:
-            state (OvercookedState): current state
-            player (PlayerState): the player's current state
-            waiting_substitute (bool): add a substitute action that takes the place of 
-                                       a waiting action (going to closest feature)
-        
-        Returns:
-            player_actions (list): possible motion goals (pairs of goal positions and orientations)
-        """
-        player_actions = []
-        counter_pickup_objects = self.mdp.get_counter_objects_dict(state, self.counter_pickup)
-        if not player.has_object():
-            for elem in self.mdp.ALL_INGREDIENTS:
-                player_actions.extend(self.pickup_ingredient_actions(counter_pickup_objects, elem))
-
-            dish_pickup = self.pickup_dish_actions(counter_pickup_objects)
-            soup_pickup = self.pickup_counter_soup_actions(counter_pickup_objects)
-
-            pot_states_dict = self.mdp.get_pot_states(state)
-            start_cooking = self.start_cooking_actions(pot_states_dict)
-            player_actions.extend(dish_pickup + soup_pickup + start_cooking)
-
-        else:
-            player_object = player.get_object()
-            pot_states_dict = self.mdp.get_pot_states(state)
-
-            # No matter the object, we can place it on a counter
-            if len(self.counter_drop) > 0:
-                player_actions.extend(self.place_obj_on_counter_actions(state))
-
-            if player_object.name == 'soup':
-                player_actions.extend(self.deliver_soup_actions())
-            elif player_object.name in self.mdp.ALL_INGREDIENTS:
-                player_actions.extend(self.put_ingredient_in_pot_actions(pot_states_dict, player_object.name))
-            elif player_object.name == 'dish':
-                # Not considering all pots (only ones close to ready) to reduce computation
-                # NOTE: could try to calculate which pots are eligible, but would probably take
-                # a lot of compute
-                player_actions.extend(self.pickup_soup_with_dish_actions(pot_states_dict, only_nearly_ready=False))
-            else:
-                raise ValueError("Unrecognized object")
-
-        if self.wait_allowed:
-            player_actions.extend(self.wait_actions(player))
-
-        if waiting_substitute:
-            # Trying to mimic a "WAIT" action by adding the closest allowed feature to the avaliable actions
-            # This is because motion plans that aren't facing terrain features (non counter, non empty spots)
-            # are not considered valid
-            player_actions.extend(self.go_to_closest_feature_actions(player))
-
-        is_valid_goal_given_start = lambda goal: self.motion_planner.is_valid_motion_start_goal_pair(player.pos_and_or, goal)    
-        player_actions = list(filter(is_valid_goal_given_start, player_actions))
-        return player_actions
-
     def pickup_ingredient_actions(self, counter_objects, ingredient):
         ingredient_dispenser_locations = self.mdp.get_terrain_locations(ingredient)
         ingredient_pickup_locations = ingredient_dispenser_locations + counter_objects[ingredient]
@@ -516,7 +442,6 @@ class MediumLevelActionManager(object):
     def put_ingredient_in_pot_actions(self, pot_states_dict, ingredient):
         fillable_pots = self.mdp.get_partially_full_pots(pot_states_dict) + pot_states_dict['empty']
         return self._get_ml_actions_for_positions(fillable_pots)
-
     
     def pickup_soup_with_dish_actions(self, pot_states_dict, only_nearly_ready=False):
         ready_pot_locations = pot_states_dict['ready']
@@ -532,20 +457,6 @@ class MediumLevelActionManager(object):
             feature_locations += self.mdp.get_terrain_locations(elem)
         closest_feature_pos = self.motion_planner.min_cost_to_feature(player.pos_and_or, feature_locations, with_argmin=True)[1]
         return self._get_ml_actions_for_positions([closest_feature_pos])
-
-    def go_to_closest_feature_or_counter_to_goal(self, goal_pos_and_or, goal_location):
-        """Instead of going to goal_pos_and_or, go to the closest feature or counter to this goal, that ISN'T the goal itself"""
-        valid_locations = self.mdp.get_terrain_locations('pot') + self.mdp.get_terrain_locations('dish') + self.counter_drop
-        for elem in self.mdp.ALL_INGREDIENTS:
-            valid_locations += self.mdp.get_terrain_locations(elem)
-        valid_locations.remove(goal_location)
-        closest_non_goal_feature_pos = self.motion_planner.min_cost_to_feature(
-                                            goal_pos_and_or, valid_locations, with_argmin=True)[1]
-        return self._get_ml_actions_for_positions([closest_non_goal_feature_pos])
-
-    def wait_actions(self, player):
-        waiting_motion_goal = (player.position, player.orientation)
-        return [waiting_motion_goal]
 
     def _get_ml_actions_for_positions(self, positions_list):
         """Determine what are the ml actions (joint motion goals) for a list of positions
