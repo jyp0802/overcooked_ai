@@ -216,11 +216,11 @@ class OvercookedEnv(object):
         """
         return self.mdp.lossless_state_encoding(state, self.horizon)
 
-    def featurize_state_mdp(self, state, num_pots=2):
+    def featurize_state_mdp(self, state):
         """
         Wrapper of the mdp's featurize_state
         """
-        return self.mdp.featurize_state(state, self.mlam, num_pots=num_pots)
+        return self.mdp.featurize_state(state, self.mlam)
 
     def reset(self, regen_mdp=True, outside_info={}):
         """

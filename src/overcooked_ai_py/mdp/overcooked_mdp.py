@@ -1620,9 +1620,11 @@ class OvercookedGridworld(object):
     ###################
 
     def lossless_state_encoding(self, overcooked_state, horizon=400, debug=False):
-        """Featurizes a OvercookedState object into a stack of boolean masks that are easily readable by a CNN"""
-        assert self.num_players == 2, "Functionality has to be added to support encondings for > 2 players"
-        assert type(debug) is bool
+        """
+        Featurizes a OvercookedState object into a stack of boolean masks that are easily readable by a CNN
+        """
+        num_players = len(overcooked_state.players)
+
         terrain_location_features = [f"{terrain}_terrain_loc" for terrain in CFG_TERRAIN_INFO]
         object_location_features = [f"{elem}_object_loc" for elem in CFG_ALL_OBJECTS]
         object_state_features = [f"{ingredient}_in_{container}" for ingredient in CFG_ALL_INGREDIENTS for container in CFG_ALL_CONTAINERS] + \
@@ -1631,16 +1633,18 @@ class OvercookedGridworld(object):
         all_objects = overcooked_state.all_objects_list
 
         def make_layer(position, value):
-                layer = np.zeros(self.shape)
-                layer[position] = value
-                return layer
+            layer = np.zeros(self.shape)
+            layer[position] = value
+            return layer
 
         def process_for_player(primary_agent_idx):
-            # Ensure that primary_agent_idx layers are ordered before other_agent_idx layers
-            other_agent_idx = 1 - primary_agent_idx
-            ordered_player_features = ["player_{}_loc".format(primary_agent_idx), "player_{}_loc".format(other_agent_idx)] + \
+            # Ensure that primary_agent_idx layers are ordered before other agents' layers
+            agent_indicies = list(range(num_players))
+            agent_indicies.insert(0, agent_indicies.pop(primary_agent_idx))
+
+            ordered_player_features = [f"player_{agent_idx}_loc" for agent_idx in agent_indicies] + \
                         ["player_{}_orientation_{}".format(i, Direction.DIRECTION_TO_INDEX[d])
-                        for i, d in itertools.product([primary_agent_idx, other_agent_idx], Direction.ALL_DIRECTIONS)]
+                        for i, d in itertools.product(agent_indicies, Direction.ALL_DIRECTIONS)]
 
             LAYERS = ordered_player_features + terrain_location_features + object_location_features + object_state_features + urgency_features
             state_mask_dict = {k: np.zeros(self.shape) for k in LAYERS}
@@ -1652,12 +1656,6 @@ class OvercookedGridworld(object):
             for terrain in CFG_TERRAIN_INFO:
                 for loc in self.get_terrain_locations(terrain):
                     state_mask_dict[f"{terrain}_terrain_loc"][loc] = 1
-
-            # PLAYER LAYERS
-            for i, player in enumerate(overcooked_state.players):
-                player_orientation_idx = Direction.DIRECTION_TO_INDEX[player.orientation]
-                state_mask_dict["player_{}_loc".format(i)] = make_layer(player.position, 1)
-                state_mask_dict["player_{}_orientation_{}".format(i, player_orientation_idx)] = make_layer(player.position, 1)
 
             # OBJECT & STATE LAYERS
             for obj in all_objects:
@@ -1673,7 +1671,13 @@ class OvercookedGridworld(object):
                 else:
                     raise ValueError("Unrecognized object")
 
-            if debug:
+            # PLAYER LAYERS
+            for i, player in enumerate(overcooked_state.players):
+                player_orientation_idx = Direction.DIRECTION_TO_INDEX[player.orientation]
+                state_mask_dict["player_{}_loc".format(i)] = make_layer(player.position, 1)
+                state_mask_dict["player_{}_orientation_{}".format(i, player_orientation_idx)] = make_layer(player.position, 1)
+
+            if True:
                 print("terrain----")
                 print(np.array(self.terrain_mtx))
                 print("-----------")
@@ -1692,7 +1696,6 @@ class OvercookedGridworld(object):
             return np.array(state_mask_stack).astype(int)
 
         # NOTE: Currently not very efficient, a decent amount of computation repeated here
-        num_players = len(overcooked_state.players)
         final_obs_for_players = tuple(process_for_player(i) for i in range(num_players))
         return final_obs_for_players
 
@@ -1712,170 +1715,137 @@ class OvercookedGridworld(object):
 
             The encoding for player i is as follows:
 
-                [player_i_features, other_player_features player_i_dist_to_other_players, player_i_position]
+                [player_i_features, other_player_features player_i_dist_to_other_players]
 
-                player_{i}_features (length num_containers*10 + 24):
-                    pi_orientation: length 4 one-hot-encoding of direction currently facing
-                    pi_obj: length 4 one-hot-encoding of object currently being held (all 0s if no object held)
-                    pi_wall_{j}: {0, 1} boolean value of whether player i has wall immediately in direction j
-                    pi_closest_{onion|tomato|dish|soup|serving|empty_counter}: (dx, dy) where dx = x dist to item, dy = y dist to item. (0, 0) if item is currently held
-                    pi_cloest_soup_n_{onions|tomatoes}: int value for number of this ingredient in closest soup
-                    pi_closest_container_{j}_exists: {0, 1} depending on whether jth closest container found. If 0, then all other container features are 0. Note: can
-                        be 0 even if there are more than j containers on layout, if the container is not reachable by player i
-                    pi_closest_container_{j}_{is_empty|is_full|is_cooking|is_ready}: {0, 1} depending on boolean value for jth closest container
-                    pi_closest_container_{j}_{num_onions|num_tomatoes}: int value for number of this ingredient in jth closest container
-                    pi_closest_container_{j}_cook_time: int value for seconds remaining on soup. -1 if no soup is cooking
-                    pi_closest_container_{j}: (dx, dy) to jth closest container from player i location
+                player_{i}_features:
+                    pi_position [L=2]:
+                        (x, y) of player i's current position
+                    pi_orientation [L=4]:
+                        one-hot-encoding of direction currently facing
+                    pi_obj [L=num_objects]:
+                        one-hot-encoding of object currently being held (all 0s if no object held)
+                    pi_wall_{dir} [L=4]:
+                        {0, 1} boolean value of whether player i has wall immediately in direction dir
+                    pi_closest_terrain_{ter}_disp [L=2*num_terrains]:
+                        (dx, dy) where dx = x dist, dy = y dist to terrain
 
-                other_player_features (length (num_players - 1)*(num_containers*10 + 24)):
+                    pi_closest_rawfood_{obj}_disp [L=2*num_rawfood]:
+                        (dx, dy) where dx = x dist, dy = y dist to rawfood, (0, 0) if item is currently held
+
+                    pi_closest_container_{obj}_{j}_exists:
+                        {0, 1} depending on whether jth closest obj container found. If 0, then all 
+                        other obj container features are 0. Note: can be 0 even if there are more 
+                        than j obj containers on layout, if the obj container is not reachable by player i
+                    pi_closest_container_{obj}_{j}_disp:
+                        (dx, dy) to jth closest obj container from player i location
+                    pi_closest_container_{obj}_{j}_{is_empty|is_full|is_idle|is_cooking|is_ready}:
+                        {0, 1} depending on boolean value for jth closest obj container
+                    pi_closest_container_{obj}_{j}_cook_time:
+                        int value for time remaining until cooked. -1 if cooking hasn't started
+                    pi_closest_container_{obj}_{j}_num_{ingr}:
+                        int value for number of this ingredient in jth closest obj container
+
+                other_player_features:
                     ordered concatenation of player_{j}_features for j != i
                 
-                player_i_dist_to_other_players (length (num_players - 1)*2):
+                player_i_dist_to_other_players:
                     [player_j.pos - player_i.pos for j != i]
 
-                player_i_position (length 2)
         """
-
-        all_features = {}
 
         def concat_dicts(a, b):
             return {**a, **b}
 
-        def make_closest_feature(idx, player, name, locations):
-            """
-            Compute (x, y) deltas to closest feature of type `name`, and save it in the features dict
-            """
-            feat_dict = {} 
-            obj = None
-            held_obj = player.held_object
-            if held_obj and held_obj.name == name:
-                obj = held_obj
-                feat_dict[f"p{idx}_closest_{name}"] = (0, 0)
-            else:
-                loc, deltas = self.get_deltas_to_closest_location(player, locations, mlam)
-                if loc and overcooked_state.has_object(loc):
-                    obj = overcooked_state.get_object(loc)
-                feat_dict[f"p{idx}_closest_{name}"] = deltas
+        all_features = {}
 
-            if name in CFG_ALL_CONTAINERS:
-                ingredients_cnt = {}
-                if obj:
-                    ingredients_cnt = Counter(obj.ingredients)
-                for elem in CFG_ALL_INGREDIENTS:
-                    feat_dict[f"p{idx}_closest_{name}_n_{elem}"] = [ingredients_cnt[elem] if elem in ingredients_cnt else 0]
-
-            return feat_dict
-
-        def make_container_feature(idx, player, container_idx, container_loc, container_states):
-            """
-            Encode container at container_loc relative to 'player'
-            """
-            # Container doesn't exist
-            feat_dict = {}
-            if not container_loc:
-                feat_dict[f"p{idx}_closest_container_{container_idx}_exists"] = [0]
-                feat_dict[f"p{idx}_closest_container_{container_idx}_is_empty"] = [0]
-                feat_dict[f"p{idx}_closest_container_{container_idx}_is_full"] = [0]
-                feat_dict[f"p{idx}_closest_container_{container_idx}_is_cooking"] = [0]
-                feat_dict[f"p{idx}_closest_container_{container_idx}_is_ready"] = [0]
-                feat_dict[f"p{idx}_closest_container_{container_idx}_cook_time"] = [0]
-                for elem in CFG_ALL_INGREDIENTS:
-                    feat_dict[f"p{idx}_closest_container_{container_idx}_num_{elem}"] = [0]
-                feat_dict[f"p{idx}_closest_container_{container_idx}"] = (0, 0)
-                return feat_dict
-            
-            # Get position information
-            deltas = self.get_deltas_to_location(player, container_loc)
-
-            # Get container state info
-            is_empty = int(container_loc in self.get_empty_containers(container_states))
-            is_full = int(container_loc in self.get_full_containers(container_states))
-            is_cooking = int(container_loc in self.get_cooking_containers(container_states))
-            is_ready = int(container_loc in self.get_ready_containers(container_states))
-
-            # Get soup state info
-            ingredients_cnt = {}
-            cook_time_remaining = 0
-            if not is_empty:
-                soup = overcooked_state.get_object(container_loc)
-                ingredients_cnt = Counter(soup.ingredients)
-                cook_time_remaining = 0 if soup.is_idle else soup.cook_time_remaining
-            
-            # Encode container and soup info
-            feat_dict[f"p{idx}_closest_container_{container_idx}_exists"] = [1]
-            feat_dict[f"p{idx}_closest_container_{container_idx}_is_empty"] = [is_empty]
-            feat_dict[f"p{idx}_closest_container_{container_idx}_is_full"] = [is_full]
-            feat_dict[f"p{idx}_closest_container_{container_idx}_is_cooking"] = [is_cooking]
-            feat_dict[f"p{idx}_closest_container_{container_idx}_is_ready"] = [is_ready]
-            for elem in CFG_ALL_INGREDIENTS:
-                feat_dict[f"p{idx}_closest_container_{container_idx}_num_{elem}"] = [ingredients_cnt[elem] if elem in ingredients_cnt else 0]
-            feat_dict[f"p{idx}_closest_container_{container_idx}_cook_time"] = [cook_time_remaining]
-            feat_dict[f"p{idx}_closest_container_{container_idx}"] = deltas
-
-            return feat_dict
-
-            
-
-
-        IDX_TO_OBJ = CFG_ALL_OBJECTS
-        OBJ_TO_IDX = {o_name: idx for idx, o_name in enumerate(IDX_TO_OBJ)}
+        OBJ_TO_IDX = {name: idx for idx, name in enumerate(CFG_ALL_OBJECTS)}
 
         counter_objects = self.get_counter_objects_dict(overcooked_state)
-        container_states = self.get_container_states(overcooked_state)
 
         for i, player in enumerate(overcooked_state.players):
             # Player info
             orientation_idx = Direction.DIRECTION_TO_INDEX[player.orientation]
-            all_features["p{}_orientation".format(i)] = np.eye(4)[orientation_idx]
+            all_features[f"p{i}_orientation"] = np.eye(4)[orientation_idx]
+            all_features[f"p{i}_position"] = player.position
+
+            # Held object info
             obj = player.held_object
+            all_features[f"p{i}_obj"] = np.zeros(len(CFG_ALL_OBJECTS))
+            if obj:
+                all_features[f"p{i}_obj"][OBJ_TO_IDX[obj.name]] = 1
 
-            if obj is None:
-                held_obj_name = "none"
-                all_features["p{}_objs".format(i)] = np.zeros(len(IDX_TO_OBJ))
-            else:
-                held_obj_name = obj.name
-                obj_idx = OBJ_TO_IDX[held_obj_name]
-                all_features["p{}_objs".format(i)] = np.eye(len(IDX_TO_OBJ))[obj_idx]
+            # Adjacent walls info
+            for direction, (_, feat) in enumerate(self.get_adjacent_features(player)):
+                all_features[f"p{i}_wall_{direction}"] = [0] if feat == ' ' else [1]
 
-            # Closest feature for each object type
+            # Closest terrain info
+            for elem in CFG_TERRAIN_INFO:
+                _, deltas = self.get_deltas_to_closest_location(player, self.get_terrain_locations(elem), mlam)
+                all_features[f"p{i}_closest_terrain_{elem}_disp"] = deltas
+
+            # Closest rawfood info
             for elem in CFG_ALL_RAWFOOD:
-                all_features = concat_dicts(all_features, make_closest_feature(i, player, elem, self.get_terrain_locations(elem) + counter_objects[elem]))
-            all_features = concat_dicts(all_features, make_closest_feature(i, player, "deliver", self.get_terrain_locations("deliver")))
-            all_features = concat_dicts(all_features, make_closest_feature(i, player, "empty_counter", self.get_empty_counter_locations(overcooked_state)))
+                if player.has_object() and player.get_object().name == elem:
+                    all_features[f"p{i}_closest_rawfood_{elem}_disp"] = (0, 0)
+                else:
+                    _, deltas = self.get_deltas_to_closest_location(player, counter_objects[elem], mlam)
+                    all_features[f"p{i}_closest_rawfood_{elem}_disp"] = deltas
 
-            # Closest container info
+            # Closest N containers info
             for elem in CFG_ALL_CONTAINERS:
-                _, closest_container_loc = mlam.motion_planner.min_cost_to_feature(player.pos_and_or, stove_locations, with_argmin=True)
-                pot_features = make_pot_feature(i, player, pot_idx, closest_pot_loc, container_states)
-                all_features = concat_dicts(all_features, pot_features)
+                player_object_counted = False
+                remaining_containers = counter_objects[elem][:]
+                for j in range(num_containers):
+                    container = None
+                    if not player_object_counted and player.has_object() and player.get_object().name == elem:
+                        container = player.get_object()
+                        deltas = (0, 0)
+                        player_object_counted = True
+                    if not container:
+                        container_pos, deltas = self.get_deltas_to_closest_location(player, remaining_containers, mlam)
+                        if container_pos:
+                            container = overcooked_state.get_object(container_pos)
+                            remaining_containers.remove(container_pos)
 
-            pot_locations = self.get_terrain_locations('pot').copy()
-            for pot_idx in range(num_containers):
-                _, closest_pot_loc = mlam.motion_planner.min_cost_to_feature(player.pos_and_or, stove_locations, with_argmin=True)
-                pot_features = make_pot_feature(i, player, pot_idx, closest_pot_loc, container_states)
-                all_features = concat_dicts(all_features, pot_features)
+                    if container:
+                        all_features[f"p{i}_closest_container_{elem}_{j}_exists"] = [1]
+                        all_features[f"p{i}_closest_container_{elem}_{j}_disp"] = deltas
+                        all_features[f"p{i}_closest_container_{elem}_{j}_is_empty"] = [int(container.is_empty)]
+                        all_features[f"p{i}_closest_container_{elem}_{j}_is_full"] = [int(container.is_full)]
+                        all_features[f"p{i}_closest_container_{elem}_{j}_is_idle"] = [int(container.is_idle)]
+                        all_features[f"p{i}_closest_container_{elem}_{j}_is_cooking"] = [int(container.is_cooking)]
+                        all_features[f"p{i}_closest_container_{elem}_{j}_is_ready"] = [int(container.is_ready)]
+                        all_features[f"p{i}_closest_container_{elem}_{j}_cook_time"] = [int(container.cook_time_remaining)]
+                        ingredients_cnt = Counter(container.ingredients)
+                        for ingr in CFG_ALL_INGREDIENTS:
+                            all_features[f"p{i}_closest_container_{elem}_{j}_num_{ingr}"] = [ingredients_cnt[ingr]]
+                    else:
+                        all_features[f"p{i}_closest_container_{elem}_{j}_exists"] = [0]
+                        all_features[f"p{i}_closest_container_{elem}_{j}_disp"] = (0, 0)
+                        all_features[f"p{i}_closest_container_{elem}_{j}_is_empty"] = [0]
+                        all_features[f"p{i}_closest_container_{elem}_{j}_is_full"] = [0]
+                        all_features[f"p{i}_closest_container_{elem}_{j}_is_idle"] = [0]
+                        all_features[f"p{i}_closest_container_{elem}_{j}_is_cooking"] = [0]
+                        all_features[f"p{i}_closest_container_{elem}_{j}_is_ready"] = [0]
+                        all_features[f"p{i}_closest_container_{elem}_{j}_cook_time"] = [0]
+                        for ingr in CFG_ALL_INGREDIENTS:
+                            all_features[f"p{i}_closest_container_{elem}_{j}_num_{ingr}"] = [0]
 
-                if closest_pot_loc:
-                    stove_locations.remove(closest_pot_loc)
-
-            # Adjacent features info
-            for direction, pos_and_feat in enumerate(self.get_adjacent_features(player)):
-                _, feat = pos_and_feat
-                all_features["p{}_wall_{}".format(i, direction)] = [0] if feat == ' ' else [1]
+        for k, v in all_features.items():
+            print(k, v)
+        print("-------------------------------------------------------")
 
         # Convert all list and tuple values to np.arrays
         features_np = {k: np.array(v) for k, v in all_features.items()}
 
         player_features = [] # Non-position player-specific features
-        player_absolute_positions = [] # Position player-specific features
         player_relative_positions = [] # Relative position player-specific features
 
         # Compute all player-centric features for each player
         for i, player_i in enumerate(overcooked_state.players):
-            # All absolute player-centric features
-            player_i_dict = {k: v for k, v in features_np.items() if k[:2] == "p{}".format(i)}
-            features = np.concatenate(list(player_i_dict.values()))
-            abs_pos = np.array(player_i.position)
+            # Concat all player-centric features
+            concat_features = np.concatenate([v for k, v in features_np.items() if k.split("_")[0] == f"p{i}"])
+            player_features.append(concat_features)
 
             # Calculate position relative to all other players
             rel_pos = []
@@ -1884,20 +1854,17 @@ class OvercookedGridworld(object):
                     continue
                 pj_rel_to_pi = np.array(pos_distance(player_j.position, player_i.position))
                 rel_pos.append(pj_rel_to_pi)
-            rel_pos = np.concatenate(rel_pos)
-
-            player_features.append(features)
-            player_absolute_positions.append(abs_pos)
+            rel_pos = np.concatenate(rel_pos) if rel_pos else np.array(rel_pos)
             player_relative_positions.append(rel_pos)
         
         # Compute a symmetric, player-centric encoding of features for each player
         ordered_features = []
         for i, player_i in enumerate(overcooked_state.players):
             player_i_features = player_features[i]
-            player_i_abs_pos = player_absolute_positions[i]
             player_i_rel_pos = player_relative_positions[i]
-            other_player_features = np.concatenate([feats for j, feats in enumerate(player_features) if j != i])
-            player_i_ordered_features = np.squeeze(np.concatenate([player_i_features, other_player_features, player_i_rel_pos, player_i_abs_pos]))
+            other_player_features = [feats for j, feats in enumerate(player_features) if j != i]
+            other_player_features = np.concatenate(other_player_features) if other_player_features else np.array(other_player_features)
+            player_i_ordered_features = np.squeeze(np.concatenate([player_i_features, other_player_features, player_i_rel_pos]))
             ordered_features.append(player_i_ordered_features)
 
         return ordered_features
