@@ -3,31 +3,34 @@ max_num_ingredients: 3
 
 terrain_info:
   tomato:
-    symbol: "T"
     placeable: true
     dispenser: true
   onion:
-    symbol: "O"
     placeable: true
     dispenser: true
   dish:
-    symbol: "D"
     placeable: true
     dispenser: true
   deliver:
-    symbol: "_"
+    placeable: false
   stove:
-    symbol: "S"
     placeable: true
     default_object: "pot"
     activate: ["pot"]
   counter:
-    symbol: "X"
     placeable: true
   bin:
-    symbol: "B"
-  floor:
-    symbol: " "
+    placeable: false
+
+map_to_symbol:
+  tomato: "T"
+  onion: "O"
+  dish: "D"
+  deliver: "_"
+  stove: "S"
+  counter: "X"
+  bin: "B"
+  floor: " "
 
 object_representation:
   tomato: "†"

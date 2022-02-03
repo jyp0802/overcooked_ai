@@ -10,7 +10,7 @@ from overcooked_ai_py.mdp.actions import Action, Direction
 def mydebug(msg):
     if type(msg) == list:
         msg = ", ".join([str(x) for x in msg])
-    print("!!", msg)
+    # print("!!", msg)
 
 '''
 TODO:
@@ -63,13 +63,13 @@ CFG_ALL_OBJECTS = CFG_ALL_RAWFOOD + CFG_ALL_CONTAINERS
 
 #### Ingredients
 CFG_MAX_NUM_INGREDIENTS = config['max_num_ingredients']
-CFG_ALL_INGREDIENTS = list(set(CFG_ALL_RAWFOOD + list(CFG_RECIPE_3_12.keys())))
+CFG_ALL_INGREDIENTS = list(set(CFG_ALL_RAWFOOD + list(CFG_RECIPE_3_12.keys()) + ["trash"]))
 CFG_NUM_INGREDIENT_TYPE = len(CFG_ALL_INGREDIENTS)
 
-#### Representations
+#### Symbol Representations
 CFG_STR_REP = config['object_representation']
-CFG_TERRAIN_TO_SYMBOL = {k: v["symbol"] for k, v in CFG_TERRAIN_INFO.items()}
-CFG_SYMBOL_TO_TERRAIN = {v["symbol"]: k for k, v in CFG_TERRAIN_INFO.items()}
+CFG_TERRAIN_TO_SYMBOL = config['map_to_symbol']
+CFG_SYMBOL_TO_TERRAIN = {v: k for k, v in CFG_TERRAIN_TO_SYMBOL.items()}
 
 #### Default values
 CFG_DEFAULT_RECIPE_VALUE = config['default_recipe_value']
@@ -508,12 +508,6 @@ class ContainerState(object):
         return max(0, self.cook_time - self._cooking_tick)
 
     @property
-    def is_ready(self):
-        if self.is_idle or len(self._ingredients) == 0:
-            return False
-        return self._cooking_tick >= self.cook_time
-
-    @property
     def is_idle(self):
         return self._cooking_tick < 0
 
@@ -522,12 +516,18 @@ class ContainerState(object):
         return not self.is_idle and not self.is_ready
 
     @property
-    def is_full(self):
-        return len(self.ingredients) == self.max_ingredients
+    def is_ready(self):
+        if self.is_idle or len(self._ingredients) == 0:
+            return False
+        return self._cooking_tick >= self.cook_time
 
     @property
     def is_empty(self):
         return len(self.ingredients) == 0
+
+    @property
+    def is_full(self):
+        return len(self.ingredients) == self.max_ingredients
 
     @property
     def recipe(self):
@@ -1448,47 +1448,24 @@ class OvercookedGridworld(object):
     def get_terrain_locations(self, terrain_type):
         return list(self.terrain_pos_dict[CFG_TERRAIN_TO_SYMBOL[terrain_type]])
 
-    def get_container_states(self, state):
-        """Returns dict with structure:
-        {
-        empty: [positions of empty containers]
-        'x_items': [containers with x items that have yet to start cooking],
-        'cooking': [containers that are cooking but not ready]
-        'ready': [ready containers],
-        }
-        NOTE: all returned containers are just positions
-        """
-        container_states_dict = defaultdict(list)
-        all_objects = state.all_objects_by_type
-        all_containers = [obj for cont in CFG_ALL_CONTAINERS for obj in all_objects[cont]]
-
-        for container in all_containers:
-            if container.is_empty:
-                container_states_dict['empty'].append(container.position)
-            elif container.is_cooking:
-                container_states_dict['cooking'].append(container.position)
-            elif container.is_ready:
-                container_states_dict['ready'].append(container.position)
-            else:
-                num_ingredients = len(container.ingredients)
-                container_states_dict[f"{num_ingredients}_items"].append(container.position)
-
-        return container_states_dict
-
     def get_counter_objects_dict(self, state, counter_subset=None):
         """Returns a dictionary of pos:objects on counters by type"""
         if counter_subset is None:
-            counter_subset = self.terrain_pos_dict['T'] + self.terrain_pos_dict['O'] + \
-                             self.terrain_pos_dict['D'] + self.terrain_pos_dict['S'] + self.terrain_pos_dict['X']
+            counter_subset = []
+            for elem, info in CFG_TERRAIN_INFO.items():
+                if info.get("placeable"):
+                    counter_subset += self.get_terrain_locations(elem)
         counter_objects_dict = defaultdict(list)
         for obj in state.objects.values():
-            if obj.position in counters_considered:
+            if obj.position in counter_subset:
                 counter_objects_dict[obj.name].append(obj.position)
         return counter_objects_dict
 
     def get_empty_counter_locations(self, state):
-        counter_locations = self.get_terrain_locations('tomato') + self.get_terrain_locations('onion') + \
-                            self.get_terrain_locations('dish') + self.get_terrain_locations('stove') + self.get_terrain_locations('counter')
+        counter_locations = []
+        for elem, info in CFG_TERRAIN_INFO.items():
+            if info.get("placeable"):
+                counter_locations += self.get_terrain_locations(elem)
         return [pos for pos in counter_locations if not state.has_object(pos)]
 
     def get_empty_containers(self, container_states):
