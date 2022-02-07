@@ -96,7 +96,7 @@ class Recipe:
     _configured = False
     _conf = {}
     
-    def __new__(cls, ingredients):
+    def __new__(cls, ingredients, container):
         if not cls._configured:
             raise ValueError("Recipe class must be configured before recipes can be created")
         # Some basic argument verification
@@ -104,24 +104,25 @@ class Recipe:
             raise ValueError("Invalid input recipe. Must be ingredients iterable with non-zero length")
         for elem in ingredients:
             if not elem in CFG_ALL_INGREDIENTS:
-                raise ValueError("Invalid ingredient: {0}. Recipe can only contain ingredients {1}".format(elem, CFG_ALL_INGREDIENTS))
-        if not len(ingredients) <= CFG_MAX_NUM_INGREDIENTS:
-            raise ValueError("Recipe of length {0} is invalid. Recipe can contain at most {1} ingredients".format(len(ingredients), CFG_MAX_NUM_INGREDIENTS))
-        key = hash(tuple(sorted(ingredients)))
+                raise ValueError(f"Invalid ingredient: {elem}. Recipe can only contain ingredients {CFG_ALL_INGREDIENTS}")
+        if not container in CFG_ALL_CONTAINERS:
+            raise ValueError(f"Invalid container: {container}. Container can only be one of {CFG_ALL_CONTAINERS}")
+        if not len(ingredients) <= CFG_CONTAINER_INFO[container]["max_ingredients"]:
+            raise ValueError(f"Too many ingredients ({len(ingredients)}) for container ({container})")
+        key = hash(tuple(sorted(ingredients) + [container]))
         if key in cls.ALL_RECIPES_CACHE:
             return cls.ALL_RECIPES_CACHE[key]
         cls.ALL_RECIPES_CACHE[key] = super(Recipe, cls).__new__(cls)
         return cls.ALL_RECIPES_CACHE[key]
 
-    def __init__(self, ingredients):
+    def __init__(self, ingredients, container):
         self._ingredients = ingredients
-        # self.food = food
-        # self.ingredients, self.action = CFG_RECIPE_3_12[food]
-        # self.ingredients = self.ingredients.split(", ")
+        self.container = container
+        self.max_ingredients = CFG_CONTAINER_INFO[container]["max_ingredients"]
 
     def __getnewargs__(self):
         assert False
-        return (self._ingredients,)
+        return (self._ingredients, self.container)
 
     def __int__(self):
         ingredient_count = []
@@ -134,14 +135,18 @@ class Recipe:
         for idx, cnt in enumerate(ingredient_count):
             encoding += (CFG_MAX_NUM_INGREDIENTS + 1) ** idx * cnt
 
-        return mixed_mask * encoding * mixed_shift + encoding
+        ingredient_int = mixed_mask * encoding * mixed_shift + encoding
+
+        container_int = CFG_ALL_CONTAINERS.index(self.container)
+
+        return (container_int + 1) * ingredient_int
 
     def __hash__(self):
         return hash(self.ingredients)
 
     def __eq__(self, other):
         # The ingredients property already returns sorted items, so equivalence check is sufficient
-        return self.ingredients == other.ingredients
+        return self.ingredients == other.ingredients and self.container == other.container
 
     def __ne__(self, other):
         return not self == other
@@ -159,24 +164,25 @@ class Recipe:
         return int(self) >= int(other)
 
     def __repr__(self):
-        return self.ingredients.__repr__()
+        return f"{self.container}: {self.ingredients.__repr__()}"
 
     def __iter__(self):
         assert False
         return iter(self.ingredients)
 
     def __copy__(self):
-        return Recipe(self.ingredients)
+        return Recipe(self.ingredients, self.container)
 
     def __deepcopy__(self, memo):
         ingredients_cpy = copy.deepcopy(self.ingredients)
-        return Recipe(ingredients_cpy)
+        return Recipe(ingredients_cpy, self.container)
 
     @classmethod
     def _compute_all_recipes(cls):
-        for i in range(CFG_MAX_NUM_INGREDIENTS):
-            for ingredient_list in itertools.combinations_with_replacement(CFG_ALL_INGREDIENTS, i + 1):
-                cls(ingredient_list)
+        for container in CFG_ALL_CONTAINERS:
+            for i in range(CFG_CONTAINER_INFO[container]["max_ingredients"]):
+                for ingredient_list in itertools.combinations_with_replacement(CFG_ALL_INGREDIENTS, i + 1):
+                    cls(ingredient_list, container)
 
     @property
     def ingredients(self):
@@ -203,7 +209,7 @@ class Recipe:
                     sub_foods, cont = CFG_RECIPE_3_12[cur_food]
                     sub_foods = sub_foods.split(", ")
                     stack += sub_foods
-                    all_value += CFG_CONTAINER_INFO[cont]['cook_time']
+                    all_value += CFG_CONTAINER_INFO[cont]["cook_time"]
             self._delivery_reward = all_value
             return self._delivery_reward
         return CFG_DEFAULT_RECIPE_VALUE
@@ -222,12 +228,12 @@ class Recipe:
                 sub_foods, cont = CFG_RECIPE_3_12[cur_food]
                 sub_foods = sub_foods.split(", ")
                 stack += sub_foods
-                all_time += CFG_CONTAINER_INFO[cont]['cook_time']
+                all_time += CFG_CONTAINER_INFO[cont]["cook_time"]
         self._cook_time = all_time
         return self._cook_time
 
     def to_dict(self):
-        return { 'ingredients' : self.ingredients }
+        return {"ingredients": self.ingredients, "container" : self.container}
 
     def neighbors(self):
         """
@@ -236,21 +242,27 @@ class Recipe:
         on (a subset of) the ingredients of the current recipe
         """
         neighbors = []
-        if len(self.ingredients) < CFG_MAX_NUM_INGREDIENTS:
+        # Add random ingredient
+        if len(self.ingredients) < self.max_ingredients:
             for ingredient in CFG_ALL_INGREDIENTS:
-                new_ingredients = [*self.ingredients, ingredient]
-                new_recipe = Recipe(new_ingredients)
-                neighbors.append(new_recipe)
-        for sub_len in range(1, len(self.ingredients)+1):
-            for sub_ingr in itertools.combinations(self.ingredients, sub_len):
-                sub_ingr_str = ", ".join(sub_ingr)
-                if sub_ingr_str in CFG_RECIPE_1_23:
-                    new_ingr = list(self.ingredients)
-                    for x in sub_ingr:
-                        new_ingr.remove(x)
-                    new_ingr.append(CFG_RECIPE_1_23[sub_ingr_str][-1])
-                    new_recipe = Recipe(new_ingr)
+                if ingredient in CFG_CONTAINER_INFO[self.container]["can_add"]:
+                    new_ingredients = [*self.ingredients, ingredient]
+                    new_recipe = Recipe(new_ingredients, self.container)
                     neighbors.append(new_recipe)
+        # Cook current ingredients
+        ingr_str = ", ".join(self.ingredients)
+        if ingr_str in CFG_RECIPE_1_23:
+            new_ingr = [CFG_RECIPE_1_23[ingr_str][-1]]
+            new_recipe = Recipe(new_ingr, self.container)
+            neighbors.append(new_recipe)
+        # Move food to other container
+        if len(self.ingredients) == 1:
+            for container, info in CFG_CONTAINER_INFO.items():
+                if container != self.container:
+                    if self.ingredients[0] in info["can_add"]:
+                        new_ingr = [self.ingredients[0]]
+                        new_recipe = Recipe(new_ingr, container)
+                        neighbors.append(new_recipe)
         return neighbors
 
     @classproperty
@@ -369,6 +381,8 @@ class Recipe:
 
     @classmethod
     def from_dict(cls, obj_dict):
+        if not "container" in obj_dict:
+            obj_dict["container"] = "dish"
         return cls(**obj_dict)
 
     @classmethod
@@ -432,14 +446,6 @@ class FoodState(object):
     def from_dict(cls, obj_dict):
         obj_dict = copy.deepcopy(obj_dict)
         return FoodState(**obj_dict)
-
-    @property
-    def recipe(self):
-        if self.is_idle:
-            raise ValueError("Recipe is not determined until soup begins cooking")
-        if not self._recipe:
-            self._recipe = Recipe(self.name)
-        return self._recipe
 
 
 class ContainerState(object):
@@ -534,7 +540,7 @@ class ContainerState(object):
         if self.is_idle:
             raise ValueError("Recipe is not determined until soup begins cooking")
         if not self._recipe:
-            self._recipe = Recipe(self.ingredients)
+            self._recipe = Recipe(self.ingredients, self.name)
         return self._recipe
 
     def is_valid(self):
@@ -551,7 +557,7 @@ class ContainerState(object):
         # e.g., cont - flour, chocolate, milk
         #            - egg, rice
         # if container has rice, can't add flour
-        if self.is_full:
+        if self.is_full or self.is_ready:
             return False
         # JYP: might need to activate this `if` again
         # if food_name in self.ingredients:
@@ -1117,6 +1123,10 @@ class OvercookedGridworld(object):
         self.add_default_objects(start_state)
         return start_state
 
+    def is_terminal(self, state):
+        # There is a finite horizon, handled by the environment.
+        return False
+
     def get_state_transition(self, state, joint_action, display_phi=False, motion_planner=None):
         """Gets information about possible transitions for the action.
 
@@ -1241,7 +1251,7 @@ class OvercookedGridworld(object):
                     # If no object in front of player, interact with the platform
                     else:
                         if terrain_name == "deliver":
-                            if player_object.is_ready and CFG_CONTAINER_INFO[player_object.name].get("deliverable"):
+                            if type(player_object) is ContainerState and player_object.is_ready and CFG_CONTAINER_INFO[player_object.name].get("deliverable"):
                                 mydebug(f"devliver food")
                                 # Perform
                                 delivery_rew = self.deliver_food(new_state, player, player_object)
@@ -1256,7 +1266,7 @@ class OvercookedGridworld(object):
                             elif type(player_object) is ContainerState:
                                 mydebug(f"empty {player_object}")
                                 player_object.empty_container()
-                        elif CFG_TERRAIN_INFO[terrain_name].get("placeable"):
+                        elif CFG_TERRAIN_INFO.get(terrain_name, {}).get("placeable"):
                             obj_name = player_object.name
                             mydebug(f"place {player_object}")
                             # Log
@@ -1275,7 +1285,7 @@ class OvercookedGridworld(object):
                         player.set_object(obj)
                         mydebug(f"pick up {obj}")
                     # If no object in front of player, pickup from the dispenser
-                    elif CFG_TERRAIN_INFO[terrain_name].get("dispenser"):
+                    elif CFG_TERRAIN_INFO.get(terrain_name, {}).get("dispenser"):
                         mydebug(f"pick up {terrain_name}")
                         if terrain_name in CFG_ALL_RAWFOOD:
                             new_obj = FoodState(terrain_name, pos)
@@ -1677,7 +1687,7 @@ class OvercookedGridworld(object):
                 state_mask_dict["player_{}_loc".format(i)] = make_layer(player.position, 1)
                 state_mask_dict["player_{}_orientation_{}".format(i, player_orientation_idx)] = make_layer(player.position, 1)
 
-            if True:
+            if debug:
                 print("terrain----")
                 print(np.array(self.terrain_mtx))
                 print("-----------")
@@ -1831,9 +1841,9 @@ class OvercookedGridworld(object):
                         for ingr in CFG_ALL_INGREDIENTS:
                             all_features[f"p{i}_closest_container_{elem}_{j}_num_{ingr}"] = [0]
 
-        for k, v in all_features.items():
-            print(k, v)
-        print("-------------------------------------------------------")
+        # for k, v in all_features.items():
+        #     print(k, v)
+        # print("-------------------------------------------------------")
 
         # Convert all list and tuple values to np.arrays
         features_np = {k: np.array(v) for k, v in all_features.items()}
