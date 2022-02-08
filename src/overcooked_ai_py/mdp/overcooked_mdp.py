@@ -1324,7 +1324,7 @@ class OvercookedGridworld(object):
 
             return self.order_bonus * recipe.value
         else:
-
+            
             gamma = potential_params['gamma']
             value = gamma**recipe.time * self.get_recipe_value(state, recipe, container, discounted=False)
 
@@ -1593,7 +1593,7 @@ class OvercookedGridworld(object):
                 print("neighbor: ", neighbor)
                 if not neighbor in visited:
                     stack.append(neighbor)
-
+        
         if return_value:
             print("in _get best_recipe: ",best_recipe)
             return best_recipe, best_value ## 현재 들어온 재료로 가능 최고의 레시피와 최고의 가능 퍼텐셜 반환 
@@ -2018,20 +2018,43 @@ class OvercookedGridworld(object):
             container_states = self.get_container_states(state)
 
             #Base potential value is the geometric sum of making optimal soups infinitely
-            # opt_recipe, discounted_opt_recipe_value = self.get_optimal_possible_recipe(state, None, discounted=True, potential_params=potential_params, return_value=True)
-
+            ###pot###
+            opt_recipe, discounted_opt_recipe_value = self.get_optimal_possible_recipe(state, None, "pot", discounted=True, potential_params=potential_params, return_value=True)
+            print("opt_recipe, discounted_opt_recipe_value: in potential_function: ", opt_recipe, discounted_opt_recipe_value)
             print("self.get_full_but_not_cooking_pots(pot_states): ",self.get_full_but_not_cooking_containers(container_states))
             for pos in self.get_full_but_not_cooking_containers(container_states):
                 print("pos!: ", pos)
-            # idle_foods = [state.get_object(pos) for pos in self.get_full_but_not_cooking_containers(container_states)]
-            # print("idle_foods : ", idle_foods )
-            # idle_foods.extend([state.get_object(pos) for pos in self.get_partially_full_containers(container_states)])
-            # print("idle_foods_2 : ", idle_foods )
+            idle_containers = [state.get_object(pos) for pos in self.get_full_but_not_cooking_containers(container_states)]
+            print("idle_foods : ", idle_containers )
+            idle_containers.extend([state.get_object(pos) for pos in self.get_partially_full_containers(container_states)])
+            print("idle_foods_2 : ", idle_containers )
+            
+            ###container###
+            # for container in CFG_ALL_CONTAINERS:
+                 
+            #     opt_recipe, discounted_opt_recipe_value = self.get_optimal_possible_recipe(state, None, container , discounted=True, potential_params=potential_params, return_value=True)    
+            #     globals()['idle_containers_{}'.format(container)] = [state.get_object(pos) for pos in self.get_full_but_not_cooking_containers(container_states)]
+            #     globals()['idle_containers_{}'.format(container)].extend([state.get_object(pos) for pos in self.get_partially_full_containers(container_states)])
 
-            # for food in idle_foods:
-            #     print(food)
-            #     curr_recipe = Recipe(food.ingredients)
-            #     print("in step 2_ curr_recipe: ", curr_recipe)
+
+
+
+            # for container in idle_containers:
+            #     print(container)
+            #     print(container.name)
+            #     curr_recipe = Recipe(container.ingredients, container.name)
+            
+            ### Step 2 potential ###
+            # Iterate over idle soups in decreasing order of value so we greedily prioritize higher valued soups
+            
+            for container in idle_containers:
+                # Calculate optimal recipe
+                curr_recipe = Recipe(container.ingredients, container.name)
+                print("in step 2_ curr_recipe: ", curr_recipe)
+                opt_recipe, discounted_opt_recipe_value = self.get_optimal_possible_recipe(state, curr_recipe, container, discounted=True, potential_params=potential_params, return_value=True)
+                print("opt_recipe in step2 : ",opt_recipe, discounted_opt_recipe_value)
+                print("--------------------------------------------")
+            print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^6")
 
             return 100
 
