@@ -1,3 +1,4 @@
+import yaml, os
 import numpy as np
 
 import random, copy
@@ -5,18 +6,15 @@ from overcooked_ai_py.utils import rnd_int_uniform, rnd_uniform
 from overcooked_ai_py.mdp.actions import Action, Direction
 from overcooked_ai_py.mdp.overcooked_mdp import OvercookedGridworld, Recipe
 
-EMPTY = ' '
-COUNTER = 'X'
-ONION_DISPENSER = 'O'
-TOMATO_DISPENSER = 'T'
-POT = 'P'
-DISH_DISPENSER = 'D'
-SERVING_LOC = 'S'
+cur_file_dir = os.path.dirname(os.path.abspath(__file__))
+config = yaml.safe_load(open(os.path.join(cur_file_dir, 'my_config.yaml'), 'r'))
+CFG_TERRAIN_TO_SYMBOL = config['map_to_symbol']
 
-CODE_TO_TYPE = {0: EMPTY, 1: COUNTER, 2: ONION_DISPENSER, 3: TOMATO_DISPENSER, 4: POT, 5: DISH_DISPENSER,
-                6: SERVING_LOC}
+CODE_TO_TYPE = {idx: symbol for idx, (_, symbol) in enumerate(CFG_TERRAIN_TO_SYMBOL.items())}
 TYPE_TO_CODE = {v: k for k, v in CODE_TO_TYPE.items()}
 
+DEFAULT_FEATURE_TYPES = (CFG_TERRAIN_TO_SYMBOL["onion"], CFG_TERRAIN_TO_SYMBOL["dish"],
+                         CFG_TERRAIN_TO_SYMBOL["stove"], CFG_TERRAIN_TO_SYMBOL["deliver"], CFG_TERRAIN_TO_SYMBOL["bin"])
 
 
 def mdp_fn_random_choice(mdp_fn_choices):
@@ -34,9 +32,7 @@ DEFAULT_MDP_GEN_PARAMS = {
     "inner_shape": (5, 4),
     "prop_empty": 0.95,
     "prop_feats": 0.1,
-    "start_all_orders" : [
-        { "ingredients" : ["onion", "onion", "onion"]}
-    ],
+    "start_all_orders" : ["onionsoup"],
     "recipe_values" : [20],
     "recipe_times" : [20],
     "display": False
@@ -48,9 +44,7 @@ def DEFAILT_PARAMS_SCHEDULE_FN(outside_information):
         "inner_shape": (5, 4),
         "prop_empty": 0.95,
         "prop_feats": 0.1,
-        "start_all_orders" : [
-        { "ingredients" : ["onion", "onion", "onion"]}
-        ],
+        "start_all_orders" : ["onionsoup"],
         "recipe_values" : [20],
         "recipe_times" : [20],
         "display": False
@@ -82,7 +76,6 @@ class MDPParamsGenerator(object):
         mdp_params = self.params_schedule_fn(outside_information)
         return mdp_params
 
-DEFAULT_FEATURE_TYPES = (POT, ONION_DISPENSER, DISH_DISPENSER, SERVING_LOC) # NOTE: TOMATO_DISPENSER is disabled by default
 
 class LayoutGenerator(object):
     # NOTE: This class hasn't been tested extensively.
@@ -144,7 +137,7 @@ class LayoutGenerator(object):
             assert len(missing_keys) == 0, "These keys were missing from the mdp_params: {}".format(missing_keys)
             inner_shape = mdp_gen_params["inner_shape"]
             assert inner_shape[0] <= outer_shape[0] and inner_shape[1] <= outer_shape[1], \
-                "inner_shape cannot fit into the outershap"
+                "inner_shape cannot fit into the outershape"
             layout_generator = LayoutGenerator(self.mdp_params_generator, outer_shape=self.outer_shape)
             
             if "feature_types" not in mdp_gen_params:
@@ -182,7 +175,7 @@ class LayoutGenerator(object):
                 #  all_orders_kwargs["recipes"] = [Recipe.from_dict(r) for r in all_orders_kwargs["recipes"]]
         
             all_recipes = Recipe.generate_random_recipes(**all_orders_kwargs)
-            mdp_params["start_all_orders"] = [r.to_dict() for r in all_recipes]
+            mdp_params["start_all_orders"] = [r.to_dict() for r in all_recipes] #JYP
         else:
             Recipe.configure({})
             all_recipes = Recipe.ALL_RECIPES
@@ -327,7 +320,7 @@ class Grid(object):
 
     def __init__(self, shape):
         assert len(shape) == 2, "Grid must be 2 dimensional"
-        grid = (np.ones(shape) * TYPE_TO_CODE[COUNTER]).astype(np.int)
+        grid = (np.ones(shape) * TYPE_TO_CODE[CFG_TERRAIN_TO_SYMBOL["counter"]]).astype(np.int)
         self.mtx = grid
         self.shape = np.array(shape)
         self.width = shape[0]
@@ -349,7 +342,7 @@ class Grid(object):
 
     def dig(self, location):
         assert self.is_valid_dig_location(location)
-        self.change_location(location, EMPTY)
+        self.change_location(location, CFG_TERRAIN_TO_SYMBOL["floor"])
 
     def add_feature(self, location, feature_string):
         assert self.is_valid_feature_location(location)
@@ -362,7 +355,7 @@ class Grid(object):
     def proportion_empty(self):
         flattened_grid = self.mtx.flatten()
         num_eligible = len(flattened_grid) - 2 * sum(self.shape) + 4
-        num_empty = sum([1 for x in flattened_grid if x == TYPE_TO_CODE[EMPTY]])
+        num_empty = sum([1 for x in flattened_grid if x == TYPE_TO_CODE[CFG_TERRAIN_TO_SYMBOL["floor"]]])
         return float(num_empty) / num_eligible
 
     def get_near_locations(self, location):
@@ -403,7 +396,7 @@ class Grid(object):
         x, y = location
 
         # If is empty or has a feature on it
-        if not self.mtx[x][y] == TYPE_TO_CODE[COUNTER]:
+        if not self.mtx[x][y] == TYPE_TO_CODE[CFG_TERRAIN_TO_SYMBOL["counter"]]:
             return False
 
         # If outside the map
@@ -411,14 +404,14 @@ class Grid(object):
             return False
 
         # If location is next to at least one empty square
-        if any([loc for loc in self.get_near_locations(location) if CODE_TO_TYPE[self.terrain_at_loc(loc)] == EMPTY]):
+        if any([loc for loc in self.get_near_locations(location) if CODE_TO_TYPE[self.terrain_at_loc(loc)] == CFG_TERRAIN_TO_SYMBOL["floor"]]):
             return True
         else:
             return False
 
     def location_is_empty(self, location):
         x, y = location
-        return self.mtx[x][y] == TYPE_TO_CODE[EMPTY]
+        return self.mtx[x][y] == TYPE_TO_CODE[CFG_TERRAIN_TO_SYMBOL["floor"]]
 
     def get_random_interior_location(self):
         rand_x = np.random.randint(low=1, high=self.shape[0] - 1)
