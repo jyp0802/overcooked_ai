@@ -170,7 +170,6 @@ class Recipe:
         return f"{self.container}: {self.ingredients.__repr__()}"
 
     def __iter__(self):
-        assert False
         return iter(self.ingredients)
 
     def __copy__(self):
@@ -973,6 +972,7 @@ class OvercookedGridworld(object):
         self.start_state = start_state
         self._opt_recipe_discount_cache = {}
         self._opt_recipe_cache = {}
+        self._prev_potential_params = {}
 
     @staticmethod
     def from_layout_name(layout_name, **params_to_overwrite):
@@ -1305,7 +1305,7 @@ class OvercookedGridworld(object):
 
         return sparse_reward, shaped_reward
 
-    def get_recipe_value(self, state, recipe, discounted=False, base_recipe=None):
+    def get_recipe_value(self, state, recipe, container, discounted=False, base_recipe=None, potential_params = {}):
         """
         Return the reward the player should receive for delivering this recipe
 
@@ -1314,7 +1314,7 @@ class OvercookedGridworld(object):
         """
         if not recipe:
             return 0
-
+        print("@@in get_recipe recipe: ", recipe, "all_orders: ", state.all_orders)
         if not discounted:
             if not recipe in state.all_orders:
                 return 0
@@ -1324,21 +1324,9 @@ class OvercookedGridworld(object):
 
             return self.order_bonus * recipe.value
         else:
-            # Calculate missing ingredients needed to complete recipe
-            missing_ingredients = list(recipe.ingredients)
-            prev_ingredients = list(base_recipe.ingredients) if base_recipe else []
-            for ingredient in prev_ingredients:
-                missing_ingredients.remove(ingredient)
-            
-            # 원래 가지고 있는 거를 가능한 food 레시피에서 빼면 남은 재료들의 개수에 따라 값을 곱해주는 것임...(적을수록 커야하는 것 아님??)
-            n_tomatoes = len([i for i in missing_ingredients if i == Recipe.TOMATO])
-            n_onions = len([i for i in missing_ingredients if i == Recipe.ONION])
 
             gamma = potential_params['gamma']
-            value = gamma**recipe.time * self.get_recipe_value(state, recipe, discounted=False)
-
-            for elem in CFG_ALL_RAWFOOD:
-                value *= gamma**(potential_params[f'container_{elem}_steps'] * missing_ingredients.count(elem))
+            value = gamma**recipe.time * self.get_recipe_value(state, recipe, container, discounted=False)
 
             return value
 
@@ -1573,7 +1561,7 @@ class OvercookedGridworld(object):
             assert obj_state.is_valid()
     
     ### for potential
-    def _get_optimal_possible_recipe(self, state, recipe, discounted, potential_params, return_value):
+    def _get_optimal_possible_recipe(self, state, recipe, container, discounted, potential_params, return_value):
         """
         Traverse the recipe-space graph using DFS to find the best possible recipe that can be made
         from the current recipe
@@ -1587,8 +1575,8 @@ class OvercookedGridworld(object):
 
         best_value = 0
         if not recipe:
-            for ingredients in CFG_ALL_INGREDIENTS:
-                stack.append(Recipe([ingredient]))
+            for ingredient in CFG_ALL_INGREDIENTS:
+                stack.append(Recipe([ingredient],container))
         else:
             stack.append(recipe)
 
@@ -1596,16 +1584,23 @@ class OvercookedGridworld(object):
             curr_recipe = stack.pop()
             if curr_recipe not in visited:
                 visited.add(curr_recipe)
-                curr_value = self.get_recipe_value(state, curr_recipe, base_recipe = start_recipe, discounted = discounted, potential_params = potential_params)
+                print("curr_recipe before get_recipe: ", curr_recipe)
+                curr_value = self.get_recipe_value(state, curr_recipe, base_recipe = start_recipe, container = container, discounted = discounted, potential_params = potential_params)
             if curr_value > best_value:
                     best_value, best_recipe = curr_value, curr_recipe
             
             for neighbor in curr_recipe.neighbors(): ## 현재 들어온 curr_recipe로 만들 수 있는 모든 food의 경우 반환 
+                print("neighbor: ", neighbor)
                 if not neighbor in visited:
                     stack.append(neighbor)
 
+        if return_value:
+            print("in _get best_recipe: ",best_recipe)
+            return best_recipe, best_value ## 현재 들어온 재료로 가능 최고의 레시피와 최고의 가능 퍼텐셜 반환 
+        return best_recipe
 
-    def get_optimal_possible_recipe(self, state, recipe, discounted = False, potential_params={}, return_value = False):
+
+    def get_optimal_possible_recipe(self, state, recipe, container, discounted = False, potential_params={}, return_value = False):
         """
         Return the best possible recipe that can be made starting with ingredients in `recipe`
         Uses self._optimal_possible_recipe as a cache to avoid re-computing. This only works because
@@ -1629,7 +1624,7 @@ class OvercookedGridworld(object):
         print("recipe in get: ", recipe)
         if recipe not in cache :
             # Compute best recipe now and store in cache for later use
-            opt_recipe, value = self._get_optimal_possible_recipe(state, recipe, discounted = discounted, potential_params = potential_params, return_value = True)
+            opt_recipe, value = self._get_optimal_possible_recipe(state, recipe, container, discounted = discounted, potential_params = potential_params, return_value = True)
             cache[recipe] = (opt_recipe, value)
         
         # Return best recipe (and value) from cache
