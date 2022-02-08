@@ -43,6 +43,9 @@ serving:
 cur_file_dir = os.path.dirname(os.path.abspath(__file__))
 config = yaml.safe_load(open(os.path.join(cur_file_dir, 'my_config.yaml'), 'r'))
 
+#### Potential_Constant
+CFG_POTENTIAL_CONSTANTS = config['potential_constants']
+
 #### Terrain
 CFG_TERRAIN_INFO = config['terrain_info']
 CFG_STATION_INFO = {terrain: info['activate'] for terrain, info in CFG_TERRAIN_INFO.items() if 'activate' in info}
@@ -1342,12 +1345,16 @@ class OvercookedGridworld(object):
             prev_ingredients = list(base_recipe.ingredients) if base_recipe else []
             for ingredient in prev_ingredients:
                 missing_ingredients.remove(ingredient)
+            
+            # 원래 가지고 있는 거를 가능한 food 레시피에서 빼면 남은 재료들의 개수에 따라 값을 곱해주는 것임...(적을수록 커야하는 것 아님??)
+            n_tomatoes = len([i for i in missing_ingredients if i == Recipe.TOMATO])
+            n_onions = len([i for i in missing_ingredients if i == Recipe.ONION])
 
             gamma = potential_params['gamma']
             value = gamma**recipe.time * self.get_recipe_value(state, recipe, discounted=False)
 
             for elem in CFG_ALL_RAWFOOD:
-                value *= gamma**(potential_params[f'pot_{elem}_steps'] * missing_ingredients.count(elem))
+                value *= gamma**(potential_params[f'container_{elem}_steps'] * missing_ingredients.count(elem))
 
             return value
 
@@ -1474,6 +1481,34 @@ class OvercookedGridworld(object):
     def get_terrain_locations(self, terrain_type):
         return list(self.terrain_pos_dict[CFG_TERRAIN_TO_SYMBOL[terrain_type]])
 
+        ### for potential
+    def get_container_states(self, state):
+        """Returns dict with structure:
+        {
+        empty: [positions of empty containers]
+        'x_items': [containers with x items that have yet to start cooking],
+        'cooking': [containers that are cooking but not ready]
+        'ready': [ready containers],
+        }
+        NOTE: all returned containers are just positions
+        """
+        container_states_dict = defaultdict(list)
+        all_objects = state.all_objects_by_type
+        all_containers = [obj for cont in CFG_ALL_CONTAINERS for obj in all_objects[cont]]
+
+        for container in all_containers:
+            if container.is_empty:
+                container_states_dict['empty'].append(container.position)
+            elif container.is_cooking:
+                container_states_dict['cooking'].append(container.position)
+            elif container.is_ready:
+                container_states_dict['ready'].append(container.position)
+            else:
+                num_ingredients = len(container.ingredients)
+                container_states_dict[f"{num_ingredients}_items"].append(container.position)
+
+        return container_states_dict
+
     def get_counter_objects_dict(self, state, counter_subset=None):
         """Returns a dictionary of pos:objects on counters by type"""
         if counter_subset is None:
@@ -1552,6 +1587,73 @@ class OvercookedGridworld(object):
         # Check that objects have a valid state
         for obj_state in all_objects:
             assert obj_state.is_valid()
+    
+    ### for potential
+    def _get_optimal_possible_recipe(self, state, recipe, discounted, potential_params, return_value):
+        """
+        Traverse the recipe-space graph using DFS to find the best possible recipe that can be made
+        from the current recipe
+
+        Because we can't have empty recipes, we handle the case by letting recipe==None be a stand-in for empty recipe
+        """
+        start_recipe = recipe
+        visited = set()
+        stack = []
+        best_recipe = recipe
+
+        best_value = 0
+        if not recipe:
+            for ingredients in CFG_ALL_INGREDIENTS:
+                stack.append(Recipe([ingredient]))
+        else:
+            stack.append(recipe)
+
+        while stack:
+            curr_recipe = stack.pop()
+            if curr_recipe not in visited:
+                visited.add(curr_recipe)
+                curr_value = self.get_recipe_value(state, curr_recipe, base_recipe = start_recipe, discounted = discounted, potential_params = potential_params)
+            if curr_value > best_value:
+                    best_value, best_recipe = curr_value, curr_recipe
+            
+            for neighbor in curr_recipe.neighbors(): ## 현재 들어온 curr_recipe로 만들 수 있는 모든 food의 경우 반환 
+                if not neighbor in visited:
+                    stack.append(neighbor)
+
+
+    def get_optimal_possible_recipe(self, state, recipe, discounted = False, potential_params={}, return_value = False):
+        """
+        Return the best possible recipe that can be made starting with ingredients in `recipe`
+        Uses self._optimal_possible_recipe as a cache to avoid re-computing. This only works because
+        the recipe values are currently static (i.e. bonus_orders doesn't change). Would need to have cache
+        flushed if order dynamics are introduced
+        """  
+        cache_valid = not discounted or self._prev_potential_params == potential_params
+
+        if not cache_valid: ## first time            
+            if discounted:
+                self._opt_recipe_discount_cache = {}
+            else:
+                self._opt_recipe_cache = {}
+        
+        if discounted:
+            cache = self._opt_recipe_discount_cache
+            self._prev_potential_params = potential_params
+        else:
+            cache = self._opt_recipe_cache
+
+        print("recipe in get: ", recipe)
+        if recipe not in cache :
+            # Compute best recipe now and store in cache for later use
+            opt_recipe, value = self._get_optimal_possible_recipe(state, recipe, discounted = discounted, potential_params = potential_params, return_value = True)
+            cache[recipe] = (opt_recipe, value)
+        
+        # Return best recipe (and value) from cache
+        if return_value:
+            return cache[recipe]
+        print("last line: cache:   &",cache, "& recipe: &", recipe, "&" )
+        return cache[recipe][0]
+
 
     @staticmethod
     def _assert_valid_grid(grid):
@@ -1917,5 +2019,40 @@ class OvercookedGridworld(object):
     ###############################
 
     def potential_function(self, state, mp, gamma=0.99):
-        
-        return 100
+            print("mp",mp)
+            print("all_orders: ",state.all_orders)
+            # print("recipe: ", recipe)
+            if not hasattr(Recipe, '_ingredient_value'):
+                raise ValueError("Potential function requires Recipe ingredients values to work properly")
+    
+            # ingredient_value_default before in potential_params
+            for elem in CFG_ALL_INGREDIENTS:
+                Recipe._ingredient_value[elem] = 10 # JYJ 나중에 일일이 value 바꿔주기 (trash는 좀 더 low 하도록 )
+
+
+            potential_params = {
+                'gamma' : gamma,
+                'ingredient_value' : Recipe._ingredient_value,
+                **CFG_POTENTIAL_CONSTANTS.get(self.layout_name, CFG_POTENTIAL_CONSTANTS['default'])       
+            }
+            print("potential_params: ",potential_params)
+            container_states = self.get_container_states(state)
+
+            #Base potential value is the geometric sum of making optimal soups infinitely
+            # opt_recipe, discounted_opt_recipe_value = self.get_optimal_possible_recipe(state, None, discounted=True, potential_params=potential_params, return_value=True)
+
+            print("self.get_full_but_not_cooking_pots(pot_states): ",self.get_full_but_not_cooking_containers(container_states))
+            for pos in self.get_full_but_not_cooking_containers(container_states):
+                print("pos!: ", pos)
+            # idle_foods = [state.get_object(pos) for pos in self.get_full_but_not_cooking_containers(container_states)]
+            # print("idle_foods : ", idle_foods )
+            # idle_foods.extend([state.get_object(pos) for pos in self.get_partially_full_containers(container_states)])
+            # print("idle_foods_2 : ", idle_foods )
+
+            # for food in idle_foods:
+            #     print(food)
+            #     curr_recipe = Recipe(food.ingredients)
+            #     print("in step 2_ curr_recipe: ", curr_recipe)
+
+            return 100
+
