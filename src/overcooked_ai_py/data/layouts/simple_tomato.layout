@@ -1,11 +1,9 @@
 {
-    "grid":  """XXPXX
+    "grid":  """XBSXX
                 T  2T
                 X1  O
-                XXDSX""",
+                XXD_X""",
+    "start_all_orders" : ["tomatosoup"],
     "start_bonus_orders": [],
-    "start_all_orders" : [
-        { "ingredients" : ["tomato", "tomato", "tomato"]}
-    ],
     "rew_shaping_params": None
 }
