@@ -1,9 +1,9 @@
 {
-    "grid":  """XXSXX
-                O   T
+    "grid":  """XB_XX
+                O  2T
                 X1  B
                 XDX_X""",
+    "start_all_orders" : ["onionsoup", "tomatosoup", "oniontomatosoup"],
     "start_bonus_orders": [],
-    "start_all_orders" : ["onion", "onionsoup", "tomato"],
     "rew_shaping_params": None
 }
