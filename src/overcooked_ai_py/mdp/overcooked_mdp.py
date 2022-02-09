@@ -125,7 +125,6 @@ class Recipe:
         self.max_ingredients = CFG_CONTAINER_INFO[container]["max_ingredients"]
 
     def __getnewargs__(self):
-        assert False
         return (self._ingredients, self.container)
 
     def __int__(self):
@@ -1239,7 +1238,6 @@ class OvercookedGridworld(object):
                             if player_object.is_empty and not front_object.is_empty and front_object.is_ready:
                                 mydebug(f"player: empty, front: {front_object.get_cooked_food().name}")
                                 if player_object.can_add(front_object.get_cooked_food().name):
-                                    mydebug(f"added {food} to {player_object}")
                                     ## Reward
                                     ## Log
                                     ## Perform
@@ -1248,7 +1246,6 @@ class OvercookedGridworld(object):
                             elif front_object.is_empty and not player_object.is_empty and player_object.is_ready:
                                 mydebug(f"player: {player_object.get_cooked_food().name}, front: empty")
                                 if front_object.can_add(player_object.get_cooked_food().name):
-                                    mydebug(f"added {food} to {front_object}")
                                     ## Reward
                                     ## Log
                                     ## Perform
@@ -1289,7 +1286,7 @@ class OvercookedGridworld(object):
                 else:
                     # If object in front of player, pick up the object
                     if new_state.has_object(i_pos):
-                        mydebug(f"pick up {obj}")
+                        mydebug(f"pick up {new_state.get_object(i_pos)}")
                         ## Reward
                         ## Log
                         # obj_name = new_state.get_object(i_pos).name
@@ -1319,32 +1316,10 @@ class OvercookedGridworld(object):
                         ## Perform
                         obj.begin_cooking()
 
+                x = Recipe(["tomato"], "pot")
+                print(self.get_optimal_possible_recipe(new_state, x))
+
         return sparse_reward, shaped_reward
-
-    def get_recipe_value(self, state, recipe, container, discounted=False, base_recipe=None, potential_params = {}):
-        """
-        Return the reward the player should receive for delivering this recipe
-
-        The player receives 0 if recipe not in all_orders, receives base value * order_bonus
-        if recipe is in bonus orders, and receives base value otherwise
-        """
-        if not recipe:
-            return 0
-        print("@@in get_recipe recipe: ", recipe, "all_orders: ", state.all_orders)
-        if not discounted:
-            if not recipe in state.all_orders:
-                return 0
-            
-            if not recipe in state.bonus_orders:
-                return recipe.value
-
-            return self.order_bonus * recipe.value
-        else:
-            
-            gamma = potential_params['gamma']
-            value = gamma**recipe.time * self.get_recipe_value(state, recipe, container, discounted=False)
-
-            return value
 
     def deliver_food(self, state, player, dish):
         """
@@ -1575,9 +1550,34 @@ class OvercookedGridworld(object):
         # Check that objects have a valid state
         for obj_state in all_objects:
             assert obj_state.is_valid()
+
+    def get_recipe_value(self, state, recipe, discounted=False, base_recipe=None, potential_params = {}):
+        """
+        Return the reward the player should receive for delivering this recipe
+
+        The player receives 0 if recipe not in all_orders, receives base value * order_bonus
+        if recipe is in bonus orders, and receives base value otherwise
+        """
+        if not recipe:
+            return 0
+
+        if not discounted:
+            if not recipe in state.all_orders:
+                return 0
+            
+            if not recipe in state.bonus_orders:
+                return recipe.value
+
+            return self.order_bonus * recipe.value
+        else:
+            
+            gamma = potential_params['gamma']
+            value = gamma**recipe.time * self.get_recipe_value(state, recipe, discounted=False)
+
+            return value
     
     ### for potential
-    def _get_optimal_possible_recipe(self, state, recipe, container, discounted, potential_params, return_value):
+    def _get_optimal_possible_recipe(self, state, recipe, discounted, potential_params, return_value):
         """
         Traverse the recipe-space graph using DFS to find the best possible recipe that can be made
         from the current recipe
@@ -1592,7 +1592,7 @@ class OvercookedGridworld(object):
         best_value = 0
         if not recipe:
             for ingredient in CFG_ALL_INGREDIENTS:
-                stack.append(Recipe([ingredient],container))
+                stack.append(Recipe([ingredient]))
         else:
             stack.append(recipe)
 
@@ -1600,13 +1600,11 @@ class OvercookedGridworld(object):
             curr_recipe = stack.pop()
             if curr_recipe not in visited:
                 visited.add(curr_recipe)
-                print("curr_recipe before get_recipe: ", curr_recipe)
-                curr_value = self.get_recipe_value(state, curr_recipe, base_recipe = start_recipe, container = container, discounted = discounted, potential_params = potential_params)
+                curr_value = self.get_recipe_value(state, curr_recipe, base_recipe = start_recipe, discounted = discounted, potential_params = potential_params)
             if curr_value > best_value:
                     best_value, best_recipe = curr_value, curr_recipe
             
             for neighbor in curr_recipe.neighbors(): ## 현재 들어온 curr_recipe로 만들 수 있는 모든 food의 경우 반환 
-                print("neighbor: ", neighbor)
                 if not neighbor in visited:
                     stack.append(neighbor)
         
@@ -1616,7 +1614,7 @@ class OvercookedGridworld(object):
         return best_recipe
 
 
-    def get_optimal_possible_recipe(self, state, recipe, container, discounted = False, potential_params={}, return_value = False):
+    def get_optimal_possible_recipe(self, state, recipe, discounted = False, potential_params={}, return_value = False):
         """
         Return the best possible recipe that can be made starting with ingredients in `recipe`
         Uses self._optimal_possible_recipe as a cache to avoid re-computing. This only works because
@@ -1637,16 +1635,15 @@ class OvercookedGridworld(object):
         else:
             cache = self._opt_recipe_cache
 
-        print("recipe in get: ", recipe)
         if recipe not in cache :
             # Compute best recipe now and store in cache for later use
-            opt_recipe, value = self._get_optimal_possible_recipe(state, recipe, container, discounted = discounted, potential_params = potential_params, return_value = True)
+            opt_recipe, value = self._get_optimal_possible_recipe(state, recipe, discounted = discounted, potential_params = potential_params, return_value = True)
             cache[recipe] = (opt_recipe, value)
         
         # Return best recipe (and value) from cache
         if return_value:
             return cache[recipe]
-        print("last line: cache:   &",cache, "& recipe: &", recipe, "&" )
+
         return cache[recipe][0]
 
 
