@@ -57,9 +57,11 @@ _CFG_RECIPE_INFO = config['recipe_info']
 CFG_RECIPE_1_23 = {a: (b, c) for (a, b, c) in _CFG_RECIPE_INFO}
 CFG_RECIPE_12_3 = {(a, b): c for (a, b, c) in _CFG_RECIPE_INFO}
 CFG_RECIPE_3_12 = {c: (a, b) for (a, b, c) in _CFG_RECIPE_INFO}
+CFG_RECIPE_32_1 = {(c, b): a for (a, b, c) in _CFG_RECIPE_INFO}
 
 #### Objects
-CFG_ALL_RAWFOOD = config['raw_foods']
+CFG_RAWFOOD_INFO = config['raw_foods']
+CFG_ALL_RAWFOOD = list(CFG_RAWFOOD_INFO.keys())
 CFG_CONTAINER_INFO = config['container_info']
 CFG_ALL_CONTAINERS = list(CFG_CONTAINER_INFO.keys())
 CFG_ALL_OBJECTS = CFG_ALL_RAWFOOD + CFG_ALL_CONTAINERS
@@ -120,9 +122,13 @@ class Recipe:
         return cls.ALL_RECIPES_CACHE[key]
 
     def __init__(self, ingredients, container):
-        self._ingredients = ingredients
+        self._ingredients = sorted(ingredients)
         self.container = container
         self.max_ingredients = CFG_CONTAINER_INFO[container]["max_ingredients"]
+        self.value_cache = None
+        self.time_cache = None
+        self.neighbor_cache = None
+        self.sequence_cache = None
 
     def __getnewargs__(self):
         return (self._ingredients, self.container)
@@ -188,33 +194,38 @@ class Recipe:
 
     @property
     def ingredients(self):
-        return tuple(sorted(self._ingredients))
+        return tuple(self._ingredients)
 
     @ingredients.setter
     def ingredients(self, _):
         raise AttributeError("Recipes are read-only. Do not modify instance attributes after creation")
 
+    # JYP: Do we need to consider the container?
     @property
     def value(self):
         if self._delivery_reward:
             return self._delivery_reward
         if self._value_mapping and self in self._value_mapping:
             return self._value_mapping[self]
-        if all(not v is None for v in self._ingredient_value.values()):
-            all_value = 0
-            stack = self._ingredients.copy()
-            while stack:
-                cur_food = stack.pop()
-                if self._ingredient_value.get(cur_food):
-                    all_value += self._ingredient_value[cur_food]
-                elif cur_food in CFG_RECIPE_3_12:
-                    sub_foods, cont = CFG_RECIPE_3_12[cur_food]
-                    sub_foods = sub_foods.split(", ")
-                    stack += sub_foods
-                    all_value += CFG_CONTAINER_INFO[cont]["cook_time"]
-            self._delivery_reward = all_value
-            return self._delivery_reward
-        return CFG_DEFAULT_RECIPE_VALUE
+        if self.value_cache:
+            return self.value_cache
+        # Calculate value by iteratively going through ingredients
+        all_value = 0
+        stack = list(self.ingredients)
+        while stack:
+            cur_food = stack.pop()
+            if self._ingredient_value.get(cur_food):
+                all_value += self._ingredient_value[cur_food]
+            elif cur_food in CFG_RECIPE_3_12:
+                sub_foods, cont = CFG_RECIPE_3_12[cur_food]
+                sub_foods = sub_foods.split(", ")
+                stack += sub_foods
+                all_value += CFG_CONTAINER_INFO[cont]["cook_time"]
+        if all_value > 0:
+            self.value_cache = all_value
+        else:
+            self.value_cache = CFG_DEFAULT_RECIPE_VALUE
+        return self.value_cache
 
     @property
     def time(self):
@@ -222,8 +233,10 @@ class Recipe:
             return self._cook_time
         if self._time_mapping and self in self._time_mapping:
             return self._time_mapping[self]
+        if self.time_cache:
+            return self.time_cache
         all_time = 0
-        stack = self._ingredients.copy()
+        stack = list(self.ingredients)
         while stack:
             cur_food = stack.pop()
             if cur_food in CFG_RECIPE_3_12:
@@ -231,8 +244,41 @@ class Recipe:
                 sub_foods = sub_foods.split(", ")
                 stack += sub_foods
                 all_time += CFG_CONTAINER_INFO[cont]["cook_time"]
-        self._cook_time = all_time
-        return self._cook_time
+        if all_time > 0:
+            self.time_cache = all_time
+        else:
+            self.time_cache = CFG_DEFAULT_RECIPE_TIME
+        return self.time_cache
+
+    @property
+    def sequence(self):
+        if self.sequence_cache:
+            return self.sequence_cache
+
+        sequence = []
+        if len(self.ingredients) == 1:
+            old_ingr = self.ingredients[0]
+            old_cont = self.container
+            # Add
+            if old_ingr in CFG_ALL_RAWFOOD:
+                sequence.append(f"add: add {old_ingr} to {old_cont}")
+            # Cook
+            elif (old_ingr, old_cont) in CFG_RECIPE_32_1:
+                new_ingr = CFG_RECIPE_32_1[(old_ingr, old_cont)].split(", ")
+                sequence.append(f"{old_cont}: cook {new_ingr} in {old_cont} to make {old_ingr}")
+                sequence += Recipe(new_ingr, old_cont).sequence
+            # Move
+            elif old_ingr in CFG_RECIPE_3_12:
+                new_cont = CFG_RECIPE_3_12[old_ingr][1]
+                sequence.append(f"move: move {old_ingr} from {new_cont} to {old_cont}")
+                sequence += Recipe(self.ingredients, new_cont).sequence
+        else:
+            for ingr in self.ingredients:
+                sequence += Recipe([ingr], self.container).sequence
+        
+        self.sequence_cache = sequence
+        return self.sequence_cache
+                
 
     def to_dict(self):
         return {"ingredients": self.ingredients, "container" : self.container}
@@ -243,9 +289,13 @@ class Recipe:
         by either adding exactly one ingredient to the current recipe or performing one extra action
         on (a subset of) the ingredients of the current recipe
         """
+        if self.neighbor_cache:
+            return self.neighbor_cache
+
         neighbors = []
-        # Add random ingredient
-        if len(self.ingredients) < self.max_ingredients:
+        # Add random ingredient if container supports it
+        if (len(self.ingredients) < self.max_ingredients and \
+            all(ingr in CFG_CONTAINER_INFO[self.container]["can_add"] for ingr in self.ingredients)):
             for ingredient in CFG_ALL_INGREDIENTS:
                 if ingredient in CFG_CONTAINER_INFO[self.container]["can_add"]:
                     new_ingredients = [*self.ingredients, ingredient]
@@ -265,7 +315,8 @@ class Recipe:
                         new_ingr = [self.ingredients[0]]
                         new_recipe = Recipe(new_ingr, container)
                         neighbors.append(new_recipe)
-        return neighbors
+        self.neighbor_cache = neighbors
+        return self.neighbor_cache
 
     @classproperty
     def ALL_RECIPES(cls):
@@ -293,15 +344,9 @@ class Recipe:
         cls._delivery_reward = None
         cls._value_mapping = None
         cls._time_mapping = None
-        cls._ingredient_value = {elem: None for elem in CFG_ALL_INGREDIENTS}
+        cls._ingredient_value = {elem: CFG_RAWFOOD_INFO.get(elem, {}).get("value") for elem in CFG_ALL_INGREDIENTS}
 
         ## Basic checks for validity ##
-
-        # Mutual Exclusion
-        if 0 < len([_ for _ in conf.keys() if "_ingr_time" in _]) < len(CFG_ALL_RAWFOOD):
-            raise ValueError("Must specify times for all ingredients")
-        if 0 < len([_ for _ in conf.keys() if "_ingr_value" in _]) < len(CFG_ALL_RAWFOOD):
-            raise ValueError("Must specify values for all ingredients")
 
         if '_ingr_value' in '\t'.join(conf.keys()) and 'delivery_reward' in conf:
             raise ValueError("'delivery_reward' incompatible with '<ingredient>_ingvalue'")
@@ -391,7 +436,7 @@ class Recipe:
         if (ingredient_str, container_name) not in CFG_RECIPE_12_3:
             return "trash"
         return CFG_RECIPE_12_3[(ingredient_str, container_name)]
-        
+
 
 class FoodState(object):
     """
@@ -1316,8 +1361,41 @@ class OvercookedGridworld(object):
                         ## Perform
                         obj.begin_cooking()
 
-                x = Recipe(["tomato"], "pot")
-                print(self.get_optimal_possible_recipe(new_state, x))
+                potential_params = {
+                    'gamma' : 0.99,
+                    # 'ingredient_value' : Recipe._ingredient_value,
+                    **CFG_POTENTIAL_CONSTANTS.get(self.layout_name, CFG_POTENTIAL_CONSTANTS['default'])       
+                }
+                a = Recipe(["tomato"], "pot")
+                b = Recipe(["onion"], "pot")
+                c = Recipe(["onion", "tomato"], "pot")
+                d = Recipe(["onionsoup"], "pot")
+                e = Recipe(["onionsoup"], "dish")
+                f = Recipe(["oniontomatosoup"], "dish")
+                # print(a.sequence)
+                # print(b.sequence)
+                # print(c.sequence)
+                # print(d.sequence)
+                # print(e.sequence)
+                # print(f.sequence)
+                # print("-----")
+                print('Recipe(["tomato"], "pot")')
+                print(self.get_optimal_possible_recipe(new_state, a, discounted=True, potential_params=potential_params, return_value=True))
+                print("-----")
+                print('Recipe(["onion"], "pot")')
+                print(self.get_optimal_possible_recipe(new_state, b, discounted=True, potential_params=potential_params, return_value=True))
+                print("-----")
+                print('Recipe(["onion", "tomato"], "pot")')
+                print(self.get_optimal_possible_recipe(new_state, c, discounted=True, potential_params=potential_params, return_value=True))
+                print("-----")
+                print('Recipe(["onionsoup"], "pot")')
+                print(self.get_optimal_possible_recipe(new_state, d, discounted=True, potential_params=potential_params, return_value=True))
+                print("-----")
+                print('Recipe(["onionsoup"], "dish")')
+                print(self.get_optimal_possible_recipe(new_state, e, discounted=True, potential_params=potential_params, return_value=True))
+                print("-----")
+                print('Recipe(["oniontomatosoup"], "dish")')
+                print(self.get_optimal_possible_recipe(new_state, f, discounted=True, potential_params=potential_params, return_value=True))
 
         return sparse_reward, shaped_reward
 
@@ -1569,12 +1647,27 @@ class OvercookedGridworld(object):
                 return recipe.value
 
             return self.order_bonus * recipe.value
+
         else:
-            
             gamma = potential_params['gamma']
-            value = gamma**recipe.time * self.get_recipe_value(state, recipe, discounted=False)
+
+            value = self.get_recipe_value(state, recipe, discounted=False)
+            
+            if value > 0:
+                value *= gamma**recipe.time
+
+                recipe_seq = [action.split(":")[0] for action in recipe.sequence]
+                base_recipe_seq = [action.split(":")[0] for action in base_recipe.sequence]
+                
+                for action in base_recipe_seq:
+                    recipe_seq.remove(action)
+
+                for action in recipe_seq:
+                    value *= gamma**potential_params[action]
 
             return value
+
+
     
     ### for potential
     def _get_optimal_possible_recipe(self, state, recipe, discounted, potential_params, return_value):
@@ -1601,15 +1694,17 @@ class OvercookedGridworld(object):
             if curr_recipe not in visited:
                 visited.add(curr_recipe)
                 curr_value = self.get_recipe_value(state, curr_recipe, base_recipe = start_recipe, discounted = discounted, potential_params = potential_params)
-            if curr_value > best_value:
-                    best_value, best_recipe = curr_value, curr_recipe
-            
-            for neighbor in curr_recipe.neighbors(): ## 현재 들어온 curr_recipe로 만들 수 있는 모든 food의 경우 반환 
-                if not neighbor in visited:
-                    stack.append(neighbor)
+                if curr_value > best_value:
+                        best_value, best_recipe = curr_value, curr_recipe
+
+                if curr_value > 0:
+                    print(curr_recipe, curr_value)
+
+                for neighbor in curr_recipe.neighbors(): ## 현재 들어온 curr_recipe로 만들 수 있는 모든 food의 경우 반환 
+                    if not neighbor in visited:
+                        stack.append(neighbor)
         
         if return_value:
-            print("in _get best_recipe: ",best_recipe)
             return best_recipe, best_value ## 현재 들어온 재료로 가능 최고의 레시피와 최고의 가능 퍼텐셜 반환 
         return best_recipe
 
@@ -2017,14 +2112,14 @@ class OvercookedGridworld(object):
             if not hasattr(Recipe, '_ingredient_value'):
                 raise ValueError("Potential function requires Recipe ingredients values to work properly")
     
-            # ingredient_value_default before in potential_params
-            for elem in CFG_ALL_INGREDIENTS:
-                Recipe._ingredient_value[elem] = 10 # JYJ 나중에 일일이 value 바꿔주기 (trash는 좀 더 low 하도록 )
+            # # ingredient_value_default before in potential_params
+            # for elem in CFG_ALL_INGREDIENTS:
+            #     Recipe._ingredient_value[elem] = 10 # JYJ 나중에 일일이 value 바꿔주기 (trash는 좀 더 low 하도록 )
 
 
             potential_params = {
                 'gamma' : gamma,
-                'ingredient_value' : Recipe._ingredient_value,
+                # 'ingredient_value' : Recipe._ingredient_value,
                 **CFG_POTENTIAL_CONSTANTS.get(self.layout_name, CFG_POTENTIAL_CONSTANTS['default'])       
             }
             print("potential_params: ",potential_params)
