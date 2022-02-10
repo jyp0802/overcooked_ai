@@ -1562,6 +1562,11 @@ class OvercookedGridworld(object):
 
         return container_states_dict
 
+        ### for potential
+    def get_all_containers(self, state, ignore=[]):
+        """Returns a list of all container positions"""
+        return [obj.position for cont in CFG_ALL_CONTAINERS for obj in state.all_objects_by_type[cont] if cont not in ignore]
+
     def get_counter_objects_dict(self, state, counter_subset=None):
         """Returns a dictionary of pos:objects on counters by type"""
         if counter_subset is None:
@@ -1581,28 +1586,6 @@ class OvercookedGridworld(object):
             if info.get("placeable"):
                 counter_locations += self.get_terrain_locations(elem)
         return [pos for pos in counter_locations if not state.has_object(pos)]
-
-    def get_empty_containers(self, container_states):
-        """Returns containers that have 0 items in them"""
-        return container_states["empty"]
-
-    def get_non_empty_containers(self, container_states):
-        return self.get_full_containers(container_states) + self.get_partially_full_containers(container_states)
-
-    def get_ready_containers(self, container_states):
-        return container_states['ready']
-
-    def get_cooking_containers(self, container_states):
-        return container_states['cooking']
-
-    def get_full_but_not_cooking_containers(self, container_states):
-        return container_states['{}_items'.format(CFG_MAX_NUM_INGREDIENTS)]
-
-    def get_full_containers(self, container_states):
-        return self.get_cooking_containers(container_states) + self.get_ready_containers(container_states) + self.get_full_but_not_cooking_containers(container_states)
-
-    def get_partially_full_containers(self, container_states):
-        return list(set().union(*[container_states['{}_items'.format(i)] for i in range(1, CFG_MAX_NUM_INGREDIENTS)]))
 
     def _check_valid_state(self, state):
         """Checks that the state is valid.
@@ -2119,64 +2102,95 @@ class OvercookedGridworld(object):
     # POTENTIAL REWARD SHAPING FN #
     ###############################
 
+    def is_deliverable(self, state, obj):
+        return type(obj) is ContainerState and CFG_CONTAINER_INFO[obj.name].get("deliverable") and self.get_recipe_value(state, obj.recipe) > 0
+
     def potential_function(self, state, mp, gamma=0.99):
-            print("mp",mp)
-            print("all_orders: ",state.all_orders)
-            # print("recipe: ", recipe)
-            if not hasattr(Recipe, '_ingredient_value'):
-                raise ValueError("Potential function requires Recipe ingredients values to work properly")
-    
-            # # ingredient_value_default before in potential_params
-            # for elem in CFG_ALL_INGREDIENTS:
-            #     Recipe._ingredient_value[elem] = 10 # JYJ 나중에 일일이 value 바꿔주기 (trash는 좀 더 low 하도록 )
+        print("mp", mp)
+        print("all_orders: ", state.all_orders)
+
+        # ingredient_value_default before in potential_params
+        for elem in CFG_ALL_INGREDIENTS:
+            Recipe._ingredient_value[elem] = 10 # JYJ 나중에 일일이 value 바꿔주기 (trash는 좀 더 low 하도록 )
+
+        potential_params = {
+            'gamma' : gamma,
+            **CFG_POTENTIAL_CONSTANTS.get(self.layout_name, CFG_POTENTIAL_CONSTANTS["default"])       
+        }
+        # print("potential_params: ", potential_params)
 
 
-            potential_params = {
-                'gamma' : gamma,
-                # 'ingredient_value' : Recipe._ingredient_value,
-                **CFG_POTENTIAL_CONSTANTS.get(self.layout_name, CFG_POTENTIAL_CONSTANTS['default'])       
-            }
-            print("potential_params: ",potential_params)
-            container_states = self.get_container_states(state)
+        #### Base potential value is the geometric sum of making optimal soups infinitely
+        opt_recipe, discounted_opt_recipe_value = self.get_optimal_possible_recipe(state, None, discounted=True, potential_params=potential_params, return_value=True)
+        opt_recipe_value = self.get_recipe_value(state, opt_recipe)
+        discount = discounted_opt_recipe_value / opt_recipe_value
+        steady_state_value = (discount / (1 - discount)) * opt_recipe_value
+        potential = steady_state_value
+        # print("opt_recipe, discounted_opt_recipe_value: ", opt_recipe, discounted_opt_recipe_value)
+        # print("opt_recipe_value, discount, steady_state_value, potential: ", opt_recipe_value, discount, steady_state_value, potential)
 
-            #Base potential value is the geometric sum of making optimal soups infinitely
-            ###pot###
-            opt_recipe, discounted_opt_recipe_value = self.get_optimal_possible_recipe(state, None, "pot", discounted=True, potential_params=potential_params, return_value=True)
-            print("opt_recipe, discounted_opt_recipe_value: in potential_function: ", opt_recipe, discounted_opt_recipe_value)
-            print("self.get_full_but_not_cooking_pots(pot_states): ",self.get_full_but_not_cooking_containers(container_states))
-            for pos in self.get_full_but_not_cooking_containers(container_states):
-                print("pos!: ", pos)
-            idle_containers = [state.get_object(pos) for pos in self.get_full_but_not_cooking_containers(container_states)]
-            print("idle_foods : ", idle_containers )
-            idle_containers.extend([state.get_object(pos) for pos in self.get_partially_full_containers(container_states)])
-            print("idle_foods_2 : ", idle_containers )
+
+        #### Step 4: potential for players holding deliverables
+        for player in state.players:
+            if player.has_object() and self.is_deliverable(player.get_object()):
+                delivery_dist = mp.min_cost_to_feature(player.pos_and_or, self.get_terrain_locations("deliver"))
+                potential += gamma**min(delivery_dist, potential_params["max_delivery_steps"]) * max(self.get_recipe_value(state, player.get_object().recipe), 1)
+
+        #### 
+        all_containers = [state.get_object(pos) for pos in self.get_all_containers(state)]
+        cooking_container_vals = {}
+        for container in all_containers:
+            opt_recipe = self.get_optimal_possible_recipe(state, container.recipe, discounted=True, potential_params=potential_params)
+
+
+        container_states = self.get_container_states(state)
+
+        #### Step 3: potential for non-idle containers that are cooking deliverable foods
+        cooking_containers = [state.get_object(pos) for pos in container_states["cooking"] + container_states["ready"]]
+        cooking_container_vals = {}
+        for container in cooking_containers:
+            val = self.get_recipe_value(state, container.recipe)
+            if val > 0:
+                cooking_container_vals[container] = gamma**(potential_params["max_delivery_steps"] + max(potential_params["max_pickup_steps"], container.cook_time_remaining)) * val
+
+        # Reweight each non-idle container value based on agents with dishes performing greedily-optimally as outlined in docstring
+        for player in state.players:
+            if not (player.has_object() and type(player.get_object()) is ContainerState):
+                continue
+
+            best_pickup_container = None
+            best_pickup_value = 0
+
+            # find best container to pick up with dish agent currently has
+            for container in cooking_container_vals:
+                # How far away the container is (inf if not-reachable)
+                pickup_dist = mp.min_cost_to_feature(player.pos_and_or, [container.position])
+
+                # mask to award zero score if not reachable
+                # Note: this means that potentially "useful" dish pickups (where agent passes dish to other agent
+                # that can reach the container) do not recive a potential bump
+                is_useful = int(pickup_dist < np.inf)
+
+                # Always assume worst-case discounting for step 4, and bump zero-valued containers to 1 as mentioned in docstring
+                pickup_container_value = gamma**potential_params["max_delivery_steps"] * max(self.get_recipe_value(state, container.recipe), 1)
+                discount = gamma**max(container.cook_time_remaining, min(pickup_dist, potential_params["max_pickup_steps"]))
+
+                # Final discount-adjusted value for this player pursuing this container
+                pickup_value = discount * pickup_container_value * is_useful
+
+                # Update best container found for this player
+                if is_useful and pickup_value > best_pickup_value:
+                    best_pickup_container = container
+                    best_pickup_value = pickup_value
             
-            ###container###
-            # for container in CFG_ALL_CONTAINERS:
-                 
-            #     opt_recipe, discounted_opt_recipe_value = self.get_optimal_possible_recipe(state, None, container , discounted=True, potential_params=potential_params, return_value=True)    
-            #     globals()['idle_containers_{}'.format(container)] = [state.get_object(pos) for pos in self.get_full_but_not_cooking_containers(container_states)]
-            #     globals()['idle_containers_{}'.format(container)].extend([state.get_object(pos) for pos in self.get_partially_full_containers(container_states)])
+            # Set best-case score for this container. Can only improve upon previous players policies
+            # Note cooperative policies between players not considered
+            if best_pickup_container:
+                cooking_container_vals[best_pickup_container] = max(cooking_container_vals[best_pickup_container], best_pickup_value)
 
+        # Apply potential for each idle container as calculated above
+        for container in cooking_container_vals:
+            potential += cooking_container_vals[container]
 
-
-
-            # for container in idle_containers:
-            #     print(container)
-            #     print(container.name)
-            #     curr_recipe = Recipe(container.ingredients, container.name)
-            
-            ### Step 2 potential ###
-            # Iterate over idle soups in decreasing order of value so we greedily prioritize higher valued soups
-            
-            for container in idle_containers:
-                # Calculate optimal recipe
-                curr_recipe = Recipe(container.ingredients, container.name)
-                print("in step 2_ curr_recipe: ", curr_recipe)
-                opt_recipe, discounted_opt_recipe_value = self.get_optimal_possible_recipe(state, curr_recipe, container, discounted=True, potential_params=potential_params, return_value=True)
-                print("opt_recipe in step2 : ",opt_recipe, discounted_opt_recipe_value)
-                print("--------------------------------------------")
-            print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^6")
-
-            return 100
+        return 0
 
