@@ -65,19 +65,24 @@ recipe_info: [
 
 
 
-BASE_REW_SHAPING_PARAMS:
-  PLACEMENT_IN_POT_REW: 3
-  DISH_PICKUP_REWARD: 3
-  SOUP_PICKUP_REWARD: 5
-  DISH_DISP_DISTANCE_REW: 0
-  POT_DISTANCE_REW: 0
-  SOUP_DISTANCE_REW: 0
+shaped_reward:
+  add_ingredient_to_container: 3
+  move_food_from_container: 5
+  throw_away_food: 2
+  throw_away_container: 3
+  place_object: 2
+  pickup_dispenser: 1
+  pickup_object: 2
+  start_cooking: 6
 
 potential_constants:
   default:
-    pot: 10
-    move: 10
-    add: 10
+    action_potentials:
+      pot: 10
+      move: 10
+      add: 10
+    max_delivery_steps: 10
+
 default_potential:
   onion: 10
   tomato: 10

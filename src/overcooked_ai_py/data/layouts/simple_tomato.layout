@@ -5,5 +5,5 @@
                 XXD_X""",
     "start_all_orders" : ["tomatosoup"],
     "start_bonus_orders": [],
-    "rew_shaping_params": None
+    "shaped_reward_params": None
 }

@@ -10,5 +10,5 @@
     "start_bonus_orders": [],
     "recipe_values" : [10, 10, 10],
     "recipe_times" : [100, 100, 100],
-    "rew_shaping_params": None
+    "shaped_reward_params": None
 }

@@ -7,5 +7,5 @@
     "start_bonus_orders": [],
     "recipe_values" : [20, 15],
     "recipe_times" : [5, 5],
-    "rew_shaping_params": None
+    "shaped_reward_params": None
 }

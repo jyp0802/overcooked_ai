@@ -9,5 +9,5 @@
     "onion_ingr_value" : 15,
     "tomato_time" : 10,
     "onion_time" :10,
-    "rew_shaping_params": None
+    "shaped_reward_params": None
 }

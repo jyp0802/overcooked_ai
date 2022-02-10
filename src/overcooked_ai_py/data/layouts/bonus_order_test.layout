@@ -7,5 +7,5 @@
     "start_bonus_orders" : ["oniontomatosoup"],
     "recipe_values" : [10, 20, 15],
     "recipe_times" : [20, 15, 10],
-    "rew_shaping_params": None
+    "shaped_reward_params": None
 }

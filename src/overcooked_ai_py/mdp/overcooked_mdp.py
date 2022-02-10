@@ -76,6 +76,9 @@ CFG_STR_REP = config['object_representation']
 CFG_TERRAIN_TO_SYMBOL = config['map_to_symbol']
 CFG_SYMBOL_TO_TERRAIN = {v: k for k, v in CFG_TERRAIN_TO_SYMBOL.items()}
 
+#### Rewards
+CFG_SHAPED_REWARDS = config["shaped_reward"]
+
 #### Default values
 CFG_DEFAULT_RECIPE_VALUE = config['default_recipe_value']
 CFG_DEFAULT_RECIPE_TIME = config['default_recipe_time']
@@ -92,8 +95,6 @@ for cont in CFG_ALL_CONTAINERS:
     if CFG_CONTAINER_INFO[cont].get("deliverable"):
         for ingr in CFG_ALL_INGREDIENTS:
             EVENT_TYPES.append(f"deliver_{cont}_with_{ingr}")
-
-BASE_REW_SHAPING_PARAMS = config['BASE_REW_SHAPING_PARAMS']
 
 class Recipe:
     ALL_RECIPES_CACHE = {}
@@ -582,8 +583,8 @@ class ContainerState(object):
 
     @property
     def recipe(self):
-        if self.is_idle:
-            raise ValueError("Recipe is not determined until soup begins cooking")
+        if self.is_idle or self.is_empty:
+            return None
         if not self._recipe:
             self._recipe = Recipe(self.ingredients, self.name)
         return self._recipe
@@ -618,6 +619,7 @@ class ContainerState(object):
             raise ValueError("Reached maximum number of ingredients in this container")
         ingredient.position = self.position
         self._ingredients.append(ingredient)
+        self._recipe = None
 
     def add_ingredient_from_str(self, ingredient_str):
         ingredient_obj = FoodState(ingredient_str, self.position)
@@ -639,6 +641,7 @@ class ContainerState(object):
                 mydebug("Cook done")
                 cooked_food_name = Recipe.cooked_food_name(self.ingredients, self.name)
                 self._ingredients = [FoodState(cooked_food_name, self.position)]
+                self._recipe = None
 
     def get_cooked_food(self):
         assert len(self._ingredients) == 1
@@ -653,6 +656,7 @@ class ContainerState(object):
     def empty_container(self):
         self._ingredients = []
         self._cooking_tick = -1
+        self._recipe = None
 
     def deepcopy(self):
         return ContainerState(self.name, self.position, [ingredient.deepcopy() for ingredient in self._ingredients], self._cooking_tick)
@@ -985,13 +989,13 @@ class OvercookedGridworld(object):
     # INSTANTIATION METHODS #
     #########################
 
-    def __init__(self, terrain, start_player_positions, start_bonus_orders=[], rew_shaping_params=None, layout_name="unnamed_layout", start_all_orders=[], order_bonus=2, start_state=None, **kwargs):
+    def __init__(self, terrain, start_player_positions, start_bonus_orders=[], shaped_reward_params=None, layout_name="unnamed_layout", start_all_orders=[], order_bonus=2, start_state=None, **kwargs):
         """
         terrain: a matrix of strings that encode the MDP layout
         layout_name: string identifier of the layout
         start_player_positions: tuple of positions for both players' starting positions
         start_bonus_orders: List of recipes dicts that are worth a bonus 
-        rew_shaping_params: reward given for completion of specific subgoals
+        shaped_reward_params: reward given for completion of specific subgoals
         all_orders: List of all available foods the players can make, defaults to all possible recipes if empy list provided
         order_bonus: Multiplicative factor for serving a bonus recipe
         start_state: Default start state returned by get_standard_start_state
@@ -1007,7 +1011,7 @@ class OvercookedGridworld(object):
         self.start_player_positions = start_player_positions
         self.num_players = len(start_player_positions)
         self.start_bonus_orders = start_bonus_orders
-        self.reward_shaping_params = BASE_REW_SHAPING_PARAMS if rew_shaping_params is None else rew_shaping_params
+        self.shaped_reward_params = CFG_SHAPED_REWARDS if shaped_reward_params is None else shaped_reward_params
         self.layout_name = layout_name
         self.order_bonus = order_bonus
         self.start_state = start_state
@@ -1098,7 +1102,7 @@ class OvercookedGridworld(object):
                 self.start_player_positions == other.start_player_positions and \
                 self.start_bonus_orders == other.start_bonus_orders and \
                 self.start_all_orders == other.start_all_orders and \
-                self.reward_shaping_params == other.reward_shaping_params and \
+                self.shaped_reward_params == other.shaped_reward_params and \
                 self.layout_name == other.layout_name
     
     def copy(self):
@@ -1106,7 +1110,7 @@ class OvercookedGridworld(object):
             terrain=self.terrain_mtx.copy(),
             start_player_positions=self.start_player_positions,
             start_bonus_orders=self.start_bonus_orders,
-            rew_shaping_params=copy.deepcopy(self.reward_shaping_params),
+            shaped_reward_params=copy.deepcopy(self.shaped_reward_params),
             layout_name=self.layout_name,
             start_all_orders=self.start_all_orders
         )
@@ -1118,7 +1122,7 @@ class OvercookedGridworld(object):
             "terrain": self.terrain_mtx,
             "start_player_positions": self.start_player_positions,
             "start_bonus_orders": self.start_bonus_orders,
-            "rew_shaping_params": copy.deepcopy(self.reward_shaping_params),
+            "shaped_reward_params": copy.deepcopy(self.shaped_reward_params),
             "start_all_orders" : self.start_all_orders
         }
 
@@ -1254,7 +1258,7 @@ class OvercookedGridworld(object):
                             if player_object.can_add(front_object.name):
                                 old_container = player_object.deepcopy()
                                 ## Reward
-                                # shaped_reward[player_idx] += self.reward_shaping_params["PLACEMENT_IN_POT_REW"]
+                                shaped_reward[player_idx] += self.shaped_reward_params["add_ingredient_to_container"]
                                 ## Log
                                 # self.log_food_to_container(events_infos, new_state, old_container, front_object, obj.name, player_idx)
                                 # if obj.name in CFG_ALL_INGREDIENTS:
@@ -1269,7 +1273,7 @@ class OvercookedGridworld(object):
                             mydebug(f"player: ingredient, front: container")
                             if front_object.can_add(player_object.name):
                                 ## Reward
-                                # shaped_reward[player_idx] += self.reward_shaping_params["PLACEMENT_IN_POT_REW"]
+                                shaped_reward[player_idx] += self.shaped_reward_params["add_ingredient_to_container"]
                                 ## Log
                                 # old_container = front_object.deepcopy()
                                 # self.log_food_to_container(events_infos, new_state, old_container, front_object, obj.name, player_idx)
@@ -1284,6 +1288,7 @@ class OvercookedGridworld(object):
                                 mydebug(f"player: empty, front: {front_object.get_cooked_food().name}")
                                 if player_object.can_add(front_object.get_cooked_food().name):
                                     ## Reward
+                                    shaped_reward[player_idx] += self.shaped_reward_params["move_food_from_container"]
                                     ## Log
                                     ## Perform
                                     food = front_object.remove_cooked_food()
@@ -1292,6 +1297,7 @@ class OvercookedGridworld(object):
                                 mydebug(f"player: {player_object.get_cooked_food().name}, front: empty")
                                 if front_object.can_add(player_object.get_cooked_food().name):
                                     ## Reward
+                                    shaped_reward[player_idx] += self.shaped_reward_params["move_food_from_container"]
                                     ## Log
                                     ## Perform
                                     food = player_object.remove_cooked_food()
@@ -1311,18 +1317,21 @@ class OvercookedGridworld(object):
                             if type(player_object) is FoodState:
                                 mydebug(f"throw away {player_object}")
                                 ## Reward
+                                shaped_reward[player_idx] += self.shaped_reward_params["throw_away_food"]
                                 ## Log
                                 ## Perform
                                 player.remove_object()
                             elif type(player_object) is ContainerState:
                                 mydebug(f"empty {player_object}")
                                 ## Reward
+                                shaped_reward[player_idx] += self.shaped_reward_params["throw_away_container"]
                                 ## Log
                                 ## Perform
                                 player_object.empty_container()
                         elif CFG_TERRAIN_INFO.get(terrain_name, {}).get("placeable"):
                             mydebug(f"place {player_object}")
                             ## Reward
+                            shaped_reward[player_idx] += self.shaped_reward_params["place_object"]
                             ## Log
                             # self.log_object_drop(events_infos, new_state, obj_name, pot_states, player_idx)
                             ## Perform
@@ -1333,6 +1342,7 @@ class OvercookedGridworld(object):
                     if new_state.has_object(i_pos):
                         mydebug(f"pick up {new_state.get_object(i_pos)}")
                         ## Reward
+                        shaped_reward[player_idx] += self.shaped_reward_params["pickup_object"]
                         ## Log
                         # obj_name = new_state.get_object(i_pos).name
                         # self.log_object_pick(events_infos, new_state, obj_name, pot_states, player_idx)
@@ -1343,6 +1353,7 @@ class OvercookedGridworld(object):
                     elif CFG_TERRAIN_INFO.get(terrain_name, {}).get("dispenser"):
                         mydebug(f"pick up {terrain_name}")
                         ## Reward
+                        shaped_reward[player_idx] += self.shaped_reward_params["pickup_dispenser"]
                         ## Log
                         ## Perform
                         if terrain_name in CFG_ALL_RAWFOOD:
@@ -1357,45 +1368,46 @@ class OvercookedGridworld(object):
                     if type(obj) is ContainerState and obj.is_idle and not obj.is_empty and obj.name in CFG_STATION_INFO[terrain_name]:
                         mydebug(f"turn on {terrain_name} with object {obj}")
                         ## Reward
+                        shaped_reward[player_idx] += self.shaped_reward_params["start_cooking"]
                         ## Log
                         ## Perform
                         obj.begin_cooking()
 
-                potential_params = {
-                    'gamma' : 0.99,
-                    # 'ingredient_value' : Recipe._ingredient_value,
-                    **CFG_POTENTIAL_CONSTANTS.get(self.layout_name, CFG_POTENTIAL_CONSTANTS['default'])       
-                }
-                a = Recipe(["tomato"], "pot")
-                b = Recipe(["onion"], "pot")
-                c = Recipe(["onion", "tomato"], "pot")
-                d = Recipe(["onionsoup"], "pot")
-                e = Recipe(["onionsoup"], "dish")
-                f = Recipe(["oniontomatosoup"], "dish")
-                # print(a.sequence)
-                # print(b.sequence)
-                # print(c.sequence)
-                # print(d.sequence)
-                # print(e.sequence)
-                # print(f.sequence)
+                # potential_params = {
+                #     'gamma' : 0.99,
+                #     # 'ingredient_value' : Recipe._ingredient_value,
+                #     **CFG_POTENTIAL_CONSTANTS.get(self.layout_name, CFG_POTENTIAL_CONSTANTS['default'])       
+                # }
+                # a = Recipe(["tomato"], "pot")
+                # b = Recipe(["onion"], "pot")
+                # c = Recipe(["onion", "tomato"], "pot")
+                # d = Recipe(["onionsoup"], "pot")
+                # e = Recipe(["onionsoup"], "dish")
+                # f = Recipe(["oniontomatosoup"], "dish")
+                # # print(a.sequence)
+                # # print(b.sequence)
+                # # print(c.sequence)
+                # # print(d.sequence)
+                # # print(e.sequence)
+                # # print(f.sequence)
+                # # print("-----")
+                # print('Recipe(["tomato"], "pot")')
+                # print(self.get_optimal_possible_recipe(new_state, a, discounted=True, potential_params=potential_params, return_value=True))
                 # print("-----")
-                print('Recipe(["tomato"], "pot")')
-                print(self.get_optimal_possible_recipe(new_state, a, discounted=True, potential_params=potential_params, return_value=True))
-                print("-----")
-                print('Recipe(["onion"], "pot")')
-                print(self.get_optimal_possible_recipe(new_state, b, discounted=True, potential_params=potential_params, return_value=True))
-                print("-----")
-                print('Recipe(["onion", "tomato"], "pot")')
-                print(self.get_optimal_possible_recipe(new_state, c, discounted=True, potential_params=potential_params, return_value=True))
-                print("-----")
-                print('Recipe(["onionsoup"], "pot")')
-                print(self.get_optimal_possible_recipe(new_state, d, discounted=True, potential_params=potential_params, return_value=True))
-                print("-----")
-                print('Recipe(["onionsoup"], "dish")')
-                print(self.get_optimal_possible_recipe(new_state, e, discounted=True, potential_params=potential_params, return_value=True))
-                print("-----")
-                print('Recipe(["oniontomatosoup"], "dish")')
-                print(self.get_optimal_possible_recipe(new_state, f, discounted=True, potential_params=potential_params, return_value=True))
+                # print('Recipe(["onion"], "pot")')
+                # print(self.get_optimal_possible_recipe(new_state, b, discounted=True, potential_params=potential_params, return_value=True))
+                # print("-----")
+                # print('Recipe(["onion", "tomato"], "pot")')
+                # print(self.get_optimal_possible_recipe(new_state, c, discounted=True, potential_params=potential_params, return_value=True))
+                # print("-----")
+                # print('Recipe(["onionsoup"], "pot")')
+                # print(self.get_optimal_possible_recipe(new_state, d, discounted=True, potential_params=potential_params, return_value=True))
+                # print("-----")
+                # print('Recipe(["onionsoup"], "dish")')
+                # print(self.get_optimal_possible_recipe(new_state, e, discounted=True, potential_params=potential_params, return_value=True))
+                # print("-----")
+                # print('Recipe(["oniontomatosoup"], "dish")')
+                # print(self.get_optimal_possible_recipe(new_state, f, discounted=True, potential_params=potential_params, return_value=True))
 
         return sparse_reward, shaped_reward
 
@@ -1657,13 +1669,13 @@ class OvercookedGridworld(object):
                 value *= gamma**recipe.time
 
                 recipe_seq = [action.split(":")[0] for action in recipe.sequence]
-                base_recipe_seq = [action.split(":")[0] for action in base_recipe.sequence]
+                base_recipe_seq = [action.split(":")[0] for action in base_recipe.sequence] if base_recipe else []
                 
                 for action in base_recipe_seq:
                     recipe_seq.remove(action)
 
                 for action in recipe_seq:
-                    value *= gamma**potential_params[action]
+                    value *= gamma**potential_params["action_potentials"][action]
 
             return value
 
@@ -1685,7 +1697,9 @@ class OvercookedGridworld(object):
         best_value = 0
         if not recipe:
             for ingredient in CFG_ALL_INGREDIENTS:
-                stack.append(Recipe([ingredient]))
+                for container in CFG_ALL_CONTAINERS:
+                    if ingredient in CFG_CONTAINER_INFO[container]["can_add"]:
+                        stack.append(Recipe([ingredient], container))
         else:
             stack.append(recipe)
 

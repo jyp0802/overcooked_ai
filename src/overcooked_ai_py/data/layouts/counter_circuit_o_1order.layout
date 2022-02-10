@@ -6,5 +6,5 @@
                 XXXOOXXX""",
     "start_all_orders" : ["onionsoup"],
     "start_bonus_orders": [],
-    "rew_shaping_params": None
+    "shaped_reward_params": None
 }
