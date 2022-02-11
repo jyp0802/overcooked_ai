@@ -1,8 +1,8 @@
 {
-    "grid":  """XXSXX
-                O  2T
-                X1  B
-                XDX_X""",
+    "grid":  """X XfSpX X 
+                O       T 
+                X 1     Xc
+                X D B _ X """,
     "start_all_orders" : ["onionsoup", "tomatosoup", "oniontomatosoup"],
     "start_bonus_orders": [],
     "shaped_reward_params": None

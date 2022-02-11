@@ -21,14 +21,13 @@ terrain_info:
     placeable: false
   stove:
     placeable: true
-    default_object: "pot"
     activate: ["pot"]
   counter:
     placeable: true
   bin:
     placeable: false
 
-map_to_symbol:
+terrain_to_symbol:
   tomato: "T"
   onion: "O"
   dish: "D"
@@ -38,17 +37,17 @@ map_to_symbol:
   bin: "B"
   floor: " "
 
-object_representation:
-  tomato: "†"
-  onion: "ø"
-  dish: "ⓓ"
-  pot: "ⓟ"
+object_to_symbol:
+  tomato: "t"
+  onion: "o"
+  dish: "d"
+  pot: "p"
 
 container_info:
   dish:
     cook_time: 0
     max_ingredients: 1
-    can_add: ["onionsoup", "onion2soup", "tomatosoup", "oniontomatosoup"]
+    can_add: ["onionsoup", "tomatosoup", "oniontomatosoup"]
     deliverable: true
   pot:
     cook_time: 30
@@ -57,7 +56,6 @@ container_info:
 
 recipe_info: [
   ["onion", "pot", "onionsoup"],
-  ["onion, onion", "pot", "onion2soup"],
   ["tomato", "pot", "tomatosoup"],
   ["onion, tomato", "pot", "oniontomatosoup"],
 ]
@@ -68,12 +66,12 @@ recipe_info: [
 shaped_reward:
   add_ingredient_to_container: 3
   move_food_from_container: 5
-  throw_away_food: 2
-  throw_away_container: 3
+  throw_away_food: 1
+  throw_away_container: -3
   place_object: 2
   pickup_dispenser: 1
   pickup_object: 2
-  start_cooking: 6
+  start_cooking: 10
 
 potential_constants:
   default:
@@ -89,5 +87,6 @@ default_potential:
   onionsoup: 20
   tomatosoup: 20
   oniontomatosoup: 30
+
 default_recipe_value: 17
 default_recipe_time: 17

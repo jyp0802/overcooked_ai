@@ -7,8 +7,9 @@ from overcooked_ai_py.mdp.actions import Action, Direction
 from overcooked_ai_py.mdp.overcooked_mdp import OvercookedGridworld, Recipe
 
 cur_file_dir = os.path.dirname(os.path.abspath(__file__))
-config = yaml.safe_load(open(os.path.join(cur_file_dir, 'my_config.yaml'), 'r'))
-CFG_TERRAIN_TO_SYMBOL = config['map_to_symbol']
+recipe_name = yaml.safe_load(open(os.path.join(cur_file_dir, "config.yaml"), "r"))["recipe"]
+config = yaml.safe_load(open(os.path.join(cur_file_dir, "recipes", f"{recipe_name}.yaml"), "r"))
+CFG_TERRAIN_TO_SYMBOL = config["terrain_to_symbol"]
 
 CODE_TO_TYPE = {idx: symbol for idx, (_, symbol) in enumerate(CFG_TERRAIN_TO_SYMBOL.items())}
 TYPE_TO_CODE = {v: k for k, v in CODE_TO_TYPE.items()}
