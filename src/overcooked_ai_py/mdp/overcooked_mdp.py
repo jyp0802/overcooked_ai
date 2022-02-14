@@ -1596,8 +1596,8 @@ class OvercookedGridworld(object):
             if value > 0:
                 value *= gamma**recipe.time
 
-                recipe_seq = [action.split(":")[0] for action in recipe.sequence]
-                base_recipe_seq = [action.split(":")[0] for action in base_recipe.sequence] if base_recipe else []
+                recipe_seq = [action.split(":")[0] for _, action in recipe.sequence]
+                base_recipe_seq = [action.split(":")[0] for _, action in base_recipe.sequence] if base_recipe else []
                 
                 for action in base_recipe_seq:
                     recipe_seq.remove(action)
@@ -2067,6 +2067,12 @@ class OvercookedGridworld(object):
                     return True
             return False
 
+        # Constants needed for potential function
+        potential_params = {
+            "gamma" : gamma,
+            **CFG_POTENTIAL_CONSTANTS
+        }
+
         all_containers = []
         for container in self.get_all_containers(state, ignore=["dish"]):
             if container.is_empty:
@@ -2142,18 +2148,21 @@ class OvercookedGridworld(object):
                 if best_container:
                     used_containers_pos.append(best_container.position)
 
-            container_todo_list.appen([current_container, todo_list])
+            container_todo_list.append([current_container, todo_list])
             # print("-------")
             # print("* ", current_container, todo_list)
 
-        for container, todo_list in container_todo_list:
-            used_players = []
-            for action in todo_list:
-                for player in state.players:
-                    if player in used_players:
-                        continue
-                if action[0] == "add":
-                    pass
+        # for container, todo_list in container_todo_list:
+        #     used_players = []
+        #     for action in todo_list:
+        #         for player in state.players:
+        #             if player in used_players:
+        #                 continue
+        #         if action[0] == "add":
+        #             pass
+
+        # for container, todo_list, chosen_players in container_potential:
+
 
         '''
         TODO:

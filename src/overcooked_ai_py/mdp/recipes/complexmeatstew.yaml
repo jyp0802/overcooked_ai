@@ -94,14 +94,13 @@ shaped_reward:
   start_cooking: 10
 
 potential_constants:
-  default:
-    action_potentials:
-      pot: 10
-      fryingpan: 10
-      cuttingboard: 10
-      move: 10
-      add: 10
-    max_delivery_steps: 10
+  action_potentials:
+    pot: 10
+    fryingpan: 10
+    cuttingboard: 10
+    move: 10
+    add: 10
+  max_delivery_steps: 10
 
 default_potential:
   onion: 10
