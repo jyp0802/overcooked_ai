@@ -1508,38 +1508,9 @@ class OvercookedGridworld(object):
     def get_terrain_locations(self, terrain_type):
         return list(self.terrain_pos_dict[CFG_TERRAIN_TO_SYMBOL[terrain_type]])
 
-        ### for potential
-    def get_container_states(self, state):
-        """Returns dict with structure:
-        {
-        empty: [positions of empty containers]
-        'x_items': [containers with x items that have yet to start cooking],
-        'cooking': [containers that are cooking but not ready]
-        'ready': [ready containers],
-        }
-        NOTE: all returned containers are just positions
-        """
-        container_states_dict = defaultdict(list)
-        all_objects = state.all_objects_by_type
-        all_containers = [obj for cont in CFG_ALL_CONTAINERS for obj in all_objects[cont]]
-
-        for container in all_containers:
-            if container.is_empty:
-                container_states_dict['empty'].append(container.position)
-            elif container.is_cooking:
-                container_states_dict['cooking'].append(container.position)
-            elif container.is_ready:
-                container_states_dict['ready'].append(container.position)
-            else:
-                num_ingredients = len(container.ingredients)
-                container_states_dict[f"{num_ingredients}_items"].append(container.position)
-
-        return container_states_dict
-
-        ### for potential
     def get_all_containers(self, state, ignore=[]):
         """Returns a list of all container positions"""
-        return [obj.position for cont in CFG_ALL_CONTAINERS for obj in state.unowned_objects_by_type[cont] if cont not in ignore]
+        return [obj for cont in CFG_ALL_CONTAINERS for obj in state.all_objects_by_type[cont] if cont not in ignore]
 
     def get_counter_objects_dict(self, state, counter_subset=None):
         """Returns a dictionary of pos:objects on counters by type"""
@@ -2078,193 +2049,121 @@ class OvercookedGridworld(object):
         return type(obj) is ContainerState and CFG_CONTAINER_INFO[obj.name].get("deliverable") and self.get_recipe_value(state, obj.recipe) > 0
 
     def potential_function(self, state, mp, gamma=0.99):
+        
+        # Check if higher_cont is above the lower_cont
+        # i.e., having higher_cont makes lower_cont useless
+        def is_above(higher_cont, lower_cont):
+            higher_seq = higher_cont.recipe.sequence
+            lower_seq = lower_cont.recipe.sequence
+            if len(lower_seq) >= len(higher_seq):
+                return False
+            for i in range(len(higher_seq)):
+                found = True
+                for j in range(len(lower_seq)):
+                    if higher_seq[i][1] != lower_seq[j][1]:
+                        found = False
+                        break
+                if found:
+                    return True
+            return False
 
+        all_containers = []
+        for container in self.get_all_containers(state, ignore=["dish"]):
+            if container.is_empty:
+                continue
+            root_actions = [action for idx, action in container.recipe.sequence if idx == -1]
+            all_containers.append([container, root_actions])
 
-        all_containers = [state.get_object(pos) for pos in self.get_all_containers(state, ignore=["dish"])]
-        for current_container in all_containers:
-            if current_container.is_empty:
+        container_todo_list = []
+        for current_container, current_root_actions in all_containers:
+            optimal_recipe, optimal_value = self.get_optimal_possible_recipe(state, current_container.recipe, return_value=True)
+            if optimal_value <= 0:
                 continue
 
-            opt_recipe = self.get_optimal_possible_recipe(state, current_container.recipe)
-            opt_sequence = opt_recipe.sequence
+            optimal_sequence = optimal_recipe.sequence
+            optimal_tree = []
+            for pidx, (_, action) in enumerate(optimal_sequence):
+                child_indices = [cidx for cidx, (cpidx, _) in enumerate(optimal_sequence) if cpidx == pidx]
+                optimal_tree.append([child_indices, action])
 
-            inv_opt_sequence = []
-            for pidx, (_, action) in enumerate(opt_sequence):
-                child_indices = [cidx for cidx, (cpidx, _) in enumerate(opt_sequence) if cpidx == pidx]
-                inv_opt_sequence.append([child_indices, action])
-
-            stack = [inv_opt_sequence[0]]
+            # Add root action of optimal recipe to stack
+            stack = [optimal_tree[0]]
             todo_list = []
-            cnt = 1
+
+            used_containers_pos = []
             while stack:
                 child_indices, current_action = stack.pop()
-                cnt += 1
+
+                # If the current action has no child indices, it can be performed
                 if not child_indices:
                     todo_list.append(current_action)
                     continue
 
-                found_all = True
-                for cidx in child_indices:
-                    _, child_action = inv_opt_sequence[cidx]
-                    found = False
-                    for other_container in all_containers:
-                        if other_container.is_empty:
-                            continue
-                        if child_action in [cont_action for sidx, cont_action in other_container.recipe.sequence if sidx == -1]:
-                            found = True
+                best_container = None
+                best_cover = []
+                for other_container, other_root_actions in all_containers:
+                    # Don't use containers that are alread used
+                    if other_container.position in used_containers_pos:
+                        continue
+                    # If the other container is above the current container, ignore
+                    if not current_container.position in used_containers_pos and is_above(other_container, current_container):
+                        continue
+                    # Container should not be overdone
+                    if len(other_root_actions) > len(child_indices):
+                        continue
+
+                    # Find all child actions that are covered by this container
+                    current_cover = []
+                    for cidx in child_indices:
+                        _, child_action = optimal_tree[cidx]
+                        if child_action in other_root_actions:
+                            current_cover.append(child_action)
+                            
+                    # Check if this container covers better than previous containers
+                    if len(current_cover) > len(best_cover):
+                        best_cover = current_cover
+                        best_container = other_container
+                        # Break if all child actions are covered
+                        if len(best_cover) == len(child_indices):
                             break
-                    if not found:
-                        stack.append(inv_opt_sequence[cidx])
-                        found_all = False
-                if found_all:
+
+                # If all child actions are covered, current action can be performed
+                if len(best_cover) == len(child_indices):
                     todo_list.append(current_action)
-            
-            print("-------")
-            print("* ", current_container, todo_list)
+                # Find child actions that aren't covered by the best container
+                else:
+                    for cidx in child_indices:
+                        _, child_action = optimal_tree[cidx]
+                        if child_action not in best_cover:
+                            stack.append(optimal_tree[cidx])
+                        else:
+                            best_cover.remove(child_action)
+                # Mark this container as used
+                if best_container:
+                    used_containers_pos.append(best_container.position)
+
+            container_todo_list.appen([current_container, todo_list])
+            # print("-------")
+            # print("* ", current_container, todo_list)
+
+        for container, todo_list in container_todo_list:
+            used_players = []
+            for action in todo_list:
+                for player in state.players:
+                    if player in used_players:
+                        continue
+                if action[0] == "add":
+                    pass
 
         '''
         TODO:
-        1. add containers held by players as well
-        2. find best player to do each todo_action
-        3. calculate discounted potential
+        1. * add containers held by players as well
+        2. * ignore container above current container
+        3. find best player to do each todo_action
+        4. calculate discounted potential
 
-        4. containers (dishes) that are already optimal are counted separately
+        5. containers (dishes) that are already optimal are counted separately
         '''
-
-
-
-        # for each container:
-        #     get optimal recipe
-        #     get optimal recipe sequence
-        #     for each cur_action in sequence:
-        #         for each container:
-        #             if containers last action == cur_action:
-        #                 found
-
-
-        # def choose_best_player(player, player_state, target):
-        #     pickup_dist = 0
-        #     for player:
-        #         if player.state = player_state:
-        #             pickup_dist = min(mp.min_cost_to_feature(player.pos_and_or, target),pickup_dist)
-        #     return pickup_dist
-        # def discount_value(gamma, state_action, ): # 여기서 state_action은 sequence에서 move, pot에 있는 재료 등 모든 것을 포괄
-        #     discount = gamma * potential_params(state_action)
-        #     return discount
-        # def reset_player()
-        # '''
-        # def
-        #     for elem in container:
-        #         player_{elem} = player : elem 을 들고 있는 player #container를 들고 있는 player
-        #     for elem in ingredient: #ingredient에는 tomato, cutting tomato, fried tomato 등 모두 존재
-        #         player_{elem} = player : elem 을 들고 있는 player #ingredient를 들고 있는 player
-        #     player_None = player : 아무것도 하지 않는 player #요리중 X, 뭐 들고있는거 X
-        #     for food in CFG_ALL_FOOD: #모든 레시피 완성 음식
-        #         for container in state.containers: #containers에 pot, pan, cutting board, dish 등
-        #             if container.get_object == food: #container에 완성된 음식이 들어가있는 경우
-        #                 pickup_dist = choose_best_player(player, None, container.position)
-        #                 discount = gamma**min(min(pickup_dist, potential_params['max_pickup_steps']))
-        #                 pickup_value 계산, best_pickup_value갱신
-        #             if container.get_object == food_before: #음식 완성되기 전 재료 상태
-        #                 pickup_dist = choose_best_player(player, None, container.position)
-        #                 cook_time_remaining = soup.cook_time - soup._cooking_tick
-        #                 discount = gamma**max(cook_time_remaining, min(pickup_dist, potential_params['max_pickup_steps']))
-        #                 pickup_value 계산, best_pickup_value갱신
-        #             potential += best_pickup_value
-        # '''
-        # def is_elem(elem, container):
-        #     if elem.element != container.get_object ##element = tomato, tomatosoup 등  
-        #         return False
-        #     if !is_empty(elem.container):
-        #         return False
-        #     return True
-        # for container in state.containers:
-        #     opt_recipe = self.get_optimal_possible_recipe(retur)
-        #     if opt_recipe:
-        #         sequence = Recipe(opt_recipe, container.name).sequence
-        #         for elem in sequence:
-        #             if is_elem(elem, container): #elem의 값이 현재 이루어져있는가
-        #                 # pickup_dist = choose_best_player()
-        #                 # discount *= discount_value(gamma, elem.state_action)
-        #                 break
-        #             else : # 전단계 확인
-        #                 # pickup_dist = choose_best_player()
-        #                 discount *= discount_value(gamma, elem.state_action)
-        #     potential += discount * max(self.get_recipe_value(state, opt_recipe), 1)  
-        #     reset_player()
-
-
-        # #### Base potential value is the geometric sum of making optimal soups infinitely
-        # opt_recipe, discounted_opt_recipe_value = self.get_optimal_possible_recipe(state, None, discounted=True, potential_params=potential_params, return_value=True)
-        # opt_recipe_value = self.get_recipe_value(state, opt_recipe)
-        # discount = discounted_opt_recipe_value / opt_recipe_value
-        # steady_state_value = (discount / (1 - discount)) * opt_recipe_value
-        # potential = steady_state_value
-        # # print("opt_recipe, discounted_opt_recipe_value: ", opt_recipe, discounted_opt_recipe_value)
-        # # print("opt_recipe_value, discount, steady_state_value, potential: ", opt_recipe_value, discount, steady_state_value, potential)
-
-
-        # #### Step 4: potential for players holding deliverables
-        # for player in state.players:
-        #     if player.has_object() and self.is_deliverable(player.get_object()):
-        #         delivery_dist = mp.min_cost_to_feature(player.pos_and_or, self.get_terrain_locations("deliver"))
-        #         potential += gamma**min(delivery_dist, potential_params["max_delivery_steps"]) * max(self.get_recipe_value(state, player.get_object().recipe), 1)
-
-        # #### 
-        # all_containers = [state.get_object(pos) for pos in self.get_all_containers(state)]
-        # cooking_container_vals = {}
-        # for container in all_containers:
-        #     opt_recipe = self.get_optimal_possible_recipe(state, container.recipe, discounted=True, potential_params=potential_params)
-
-
-        # container_states = self.get_container_states(state)
-
-        # #### Step 3: potential for non-idle containers that are cooking deliverable foods
-        # cooking_containers = [state.get_object(pos) for pos in container_states["cooking"] + container_states["ready"]]
-        # cooking_container_vals = {}
-        # for container in cooking_containers:
-        #     val = self.get_recipe_value(state, container.recipe)
-        #     if val > 0:
-        #         cooking_container_vals[container] = gamma**(potential_params["max_delivery_steps"] + max(potential_params["max_pickup_steps"], container.cook_time_remaining)) * val
-
-        # # Reweight each non-idle container value based on agents with dishes performing greedily-optimally as outlined in docstring
-        # for player in state.players:
-        #     if not (player.has_object() and type(player.get_object()) is ContainerState):
-        #         continue
-
-        #     best_pickup_container = None
-        #     best_pickup_value = 0
-
-        #     # find best container to pick up with dish agent currently has
-        #     for container in cooking_container_vals:
-        #         # How far away the container is (inf if not-reachable)
-        #         pickup_dist = mp.min_cost_to_feature(player.pos_and_or, [container.position])
-
-        #         # mask to award zero score if not reachable
-        #         # Note: this means that potentially "useful" dish pickups (where agent passes dish to other agent
-        #         # that can reach the container) do not recive a potential bump
-        #         is_useful = int(pickup_dist < np.inf)
-
-        #         # Always assume worst-case discounting for step 4, and bump zero-valued containers to 1 as mentioned in docstring
-        #         pickup_container_value = gamma**potential_params["max_delivery_steps"] * max(self.get_recipe_value(state, container.recipe), 1)
-        #         discount = gamma**max(container.cook_time_remaining, min(pickup_dist, potential_params["max_pickup_steps"]))
-
-        #         # Final discount-adjusted value for this player pursuing this container
-        #         pickup_value = discount * pickup_container_value * is_useful
-
-        #         # Update best container found for this player
-        #         if is_useful and pickup_value > best_pickup_value:
-        #             best_pickup_container = container
-        #             best_pickup_value = pickup_value
-            
-        #     # Set best-case score for this container. Can only improve upon previous players policies
-        #     # Note cooperative policies between players not considered
-        #     if best_pickup_container:
-        #         cooking_container_vals[best_pickup_container] = max(cooking_container_vals[best_pickup_container], best_pickup_value)
-
-        # # Apply potential for each idle container as calculated above
-        # for container in cooking_container_vals:
-        #     potential += cooking_container_vals[container]
 
         return 0
 
