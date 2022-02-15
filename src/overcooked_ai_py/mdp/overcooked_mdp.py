@@ -2152,17 +2152,100 @@ class OvercookedGridworld(object):
             # print("-------")
             # print("* ", current_container, todo_list)
 
-        # for container, todo_list in container_todo_list:
-        #     used_players = []
-        #     for action in todo_list:
-        #         for player in state.players:
-        #             if player in used_players:
-        #                 continue
-        #         if action[0] == "add":
-        #             pass
+        # print(container_todo_list)
+        # container_todo_list = [[]]
+        
+        for container, todo_list in container_todo_list:
+            used_players = []
+            for action in todo_list:
+                print("dddddddd:", todo_list )
+                ## add 
+                action = ["add", "onion", "cuttingboard"]
+                if action[0] == "add":
+                    closest_dist = np.inf
+                    print("in add: ", action[0])
+                    chosen_player = None
+                    for player in state.players:
+                        if player in used_players:
+                            continue
+                        # to_conts = action[2].list^^
+                        to_conts = []
+                        for container in self.get_all_containers(state, ignore=["dish"]):
+                            if container.name == action[2]:
+                                to_conts.append(container)
+                        print("to_conts: ",to_conts)
 
-        # for container, todo_list, chosen_players in container_potential:
 
+                        if player.held_object == None:
+                            dist = np.inf
+                            for to_cont in to_conts:
+                                # for pos_ingr in action[1].list^^ :
+                                # pos_ingrs = [obj for obj in state.all_objects_by_type[action[1]]]
+                                pos_ingrs = []
+                                for raw_ingr in self.get_terrain_locations(action[1]):
+                                    pos_ingrs.append(raw_ingr)
+                                for pos_ingr in pos_ingrs:
+                                    curr_dist = mp.min_cost_to_feature(player.pos_and_or, [pos_ingr]) # + mp.min_cost_to_feature(pos_ingr, to_cont)
+                                    print("1_curr_dist: ", curr_dist)
+                                    if dist > curr_dist:
+                                        dist = curr_dist
+                                if closest_dist > dist:
+                                    closest_dist = dist 
+                                    chosen_player = player
+                                            
+                        
+                        elif player.get_object().name == action[1]: # 만약 raw_ingr를 들고 있으면 
+                            dist = np.inf
+                            print("to_conts: ", to_conts)
+                            for to_cont in to_conts:
+                                print("to_cont",to_cont)
+                                curr_dist = mp.min_cost_to_feature(player.pos_and_or, [to_cont._position])
+                                print("2_curr_dist: ", curr_dist)
+                                if dist > curr_dist:
+                                    dist = curr_dist 
+                            if closest_dist > dist:
+                                closest_dist = dist 
+                                chosen_player = player
+
+                    discount = 1
+                    # discount *= gamma**min(closest_dist, potential_params[action[1]])
+                    discount *= gamma**min(closest_dist, 10)
+
+                    if chosen_player:
+                        used_players.append(chosen_player)
+                        print("chosen_players: ", chosen_player)
+
+                ## move
+                # if action[0] == "move":
+                #     closest_dist = np.inf
+                #     closest_player = None
+                #     for player in state.players:
+                #         if player in used_players:
+                #             continue
+                #         to_conts = action[3].list^^ 
+
+                #         from_conts = [obj for obj in state.all_objects_by_type[action[2]]]
+                #         dist = np.inf
+                        
+                #         for from_cont in from_conts:
+                #             if player.get_object() == from_cont: 
+                #                 for to_cont in to_conts: 
+                #                     curr_dist = mp.min_cost_to_feature(player.pos_and_or, to_cont)
+                #                     if closest_dist > curr_dist:
+                #                         closest_dist = curr_dist 
+                #                         chosen_player = player 
+                            
+                #             elif player.held_object == None:
+                #                 for to_cont in to_conts: 
+                #                     curr_dist = mp.min_cost_to_feature(player.pos_and_or, from_cont) + mp.min_cost_to_feature(from_cont, to_cont)
+                #                     if closest_dist > curr_dist:
+                #                         closest_dist = curr_dist 
+                #                         chosen_player = player
+                #     discount *= gamma**min(closest_dist, potential_params[action[1]])
+                #     if chosen_player:
+                #         used_players.append(chosen_player)                
+
+                    
 
         '''
         TODO:
