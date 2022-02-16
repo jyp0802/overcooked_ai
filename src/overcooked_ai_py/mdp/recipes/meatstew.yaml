@@ -94,21 +94,13 @@ shaped_reward:
   start_cooking: 10
 
 potential_constants:
-  default:
-    action_potentials:
-      pot: 10
-      fryingpan: 10
-      cuttingboard: 10
-      move: 10
-      add: 10
-    max_delivery_steps: 10
-
-default_potential:
-  onion: 10
-  tomato: 10
-  onionsoup: 20
-  tomatosoup: 20
-  oniontomatosoup: 30
+  action_potentials:
+    pot: 10
+    fryingpan: 10
+    cuttingboard: 10
+    move: 10
+    add: 10
+  max_delivery_steps: 10
 
 default_recipe_value: 17
 default_recipe_time: 17

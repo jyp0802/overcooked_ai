@@ -6,6 +6,7 @@ from functools import reduce
 from collections import defaultdict, Counter
 from overcooked_ai_py.utils import pos_distance, read_layout_dict, classproperty
 from overcooked_ai_py.mdp.actions import Action, Direction
+from overcooked_ai_py.mdp.hungarian import get_best_assignment
 
 def mydebug(msg):
     if type(msg) == list:
@@ -40,10 +41,10 @@ serving:
     # GET ALL CONFIG INFO #
     #######################
 
-cur_file_dir = os.path.dirname(os.path.abspath(__file__))
+curr_file_dir = os.path.dirname(os.path.abspath(__file__))
 
-recipe_name = yaml.safe_load(open(os.path.join(cur_file_dir, "config.yaml"), "r"))["recipe"]
-config = yaml.safe_load(open(os.path.join(cur_file_dir, "recipes", f"{recipe_name}.yaml"), "r"))
+recipe_name = yaml.safe_load(open(os.path.join(curr_file_dir, "config.yaml"), "r"))["recipe"]
+config = yaml.safe_load(open(os.path.join(curr_file_dir, "recipes", f"{recipe_name}.yaml"), "r"))
 
 #### Potential_Constant
 CFG_POTENTIAL_CONSTANTS = config['potential_constants']
@@ -217,11 +218,11 @@ class Recipe:
         all_value = 0
         stack = list(self.ingredients)
         while stack:
-            cur_food = stack.pop()
-            if self._ingredient_value.get(cur_food):
-                all_value += self._ingredient_value[cur_food]
-            elif cur_food in CFG_RECIPE_3_12:
-                sub_foods, cont = CFG_RECIPE_3_12[cur_food]
+            curr_food = stack.pop()
+            if self._ingredient_value.get(curr_food):
+                all_value += self._ingredient_value[curr_food]
+            elif curr_food in CFG_RECIPE_3_12:
+                sub_foods, cont = CFG_RECIPE_3_12[curr_food]
                 sub_foods = sub_foods.split(", ")
                 stack += sub_foods
                 all_value += CFG_CONTAINER_INFO[cont]["cook_time"]
@@ -242,9 +243,9 @@ class Recipe:
         all_time = 0
         stack = list(self.ingredients)
         while stack:
-            cur_food = stack.pop()
-            if cur_food in CFG_RECIPE_3_12:
-                sub_foods, cont = CFG_RECIPE_3_12[cur_food]
+            curr_food = stack.pop()
+            if curr_food in CFG_RECIPE_3_12:
+                sub_foods, cont = CFG_RECIPE_3_12[curr_food]
                 sub_foods = sub_foods.split(", ")
                 stack += sub_foods
                 all_time += CFG_CONTAINER_INFO[cont]["cook_time"]
@@ -261,22 +262,23 @@ class Recipe:
         
         sequence = []
         if len(self.ingredients) == 1:
-            old_ingr = self.ingredients[0]
-            old_cont = self.container
+            food = self.ingredients[0]
+            cont = self.container
             # Add
-            if old_ingr in CFG_ALL_RAWFOOD:
-                sequence.append([-1, f"add: add {old_ingr} to {old_cont}"])
+            if food in CFG_ALL_RAWFOOD:
+                sequence.append([-1, ("add", food, cont)])
             # Cook
-            elif (old_ingr, old_cont) in CFG_RECIPE_32_1:
-                new_ingr = CFG_RECIPE_32_1[(old_ingr, old_cont)].split(", ")
-                sequence.append([-1, f"{old_cont}: cook {new_ingr} in {old_cont} to make {old_ingr}"])
-                for idx, action in Recipe(new_ingr, old_cont).sequence:
+            elif (food, cont) in CFG_RECIPE_32_1:
+                old_ingr_str = CFG_RECIPE_32_1[(food, cont)]
+                old_ingr = old_ingr_str.split(", ")
+                sequence.append([-1, ("cook", cont, old_ingr_str)])
+                for idx, action in Recipe(old_ingr, cont).sequence:
                     sequence.append([idx+1, action])
             # Move
-            elif old_ingr in CFG_RECIPE_3_12:
-                new_cont = CFG_RECIPE_3_12[old_ingr][1]
-                sequence.append([-1, f"move: move {old_ingr} from {new_cont} to {old_cont}"])
-                for idx, action in Recipe(self.ingredients, new_cont).sequence:
+            elif food in CFG_RECIPE_3_12:
+                old_cont = CFG_RECIPE_3_12[food][1]
+                sequence.append([-1, ("move", food, old_cont, cont)])
+                for idx, action in Recipe(self.ingredients, old_cont).sequence:
                     sequence.append([idx+1, action])
         else:
             shift = 0
@@ -518,6 +520,7 @@ class ContainerState(object):
         self.name = name
         self._position = tuple(position)
         self._ingredients = ingredients
+        self.ingredient_string = ", ".join(sorted(self.ingredients))
         self._cooking_tick = cooking_tick
         self._recipe = None
         self.cook_time = CFG_CONTAINER_INFO[name]['cook_time']
@@ -625,6 +628,7 @@ class ContainerState(object):
                 raise ValueError("Invalid ingredient")
             ingredient.position = self.position
             self._ingredients.append(ingredient)
+        self.ingredient_string = ", ".join(sorted(self.ingredients))
         self._recipe = None
 
     def begin_cooking(self):
@@ -644,6 +648,7 @@ class ContainerState(object):
                 cooked_food_name = Recipe.cooked_food_name(self.ingredients, self.name)
                 self._ingredients = [FoodState(cooked_food_name, self.position)]
                 self._recipe = None
+                self.ingredient_string = ", ".join(sorted(self.ingredients))
 
     def remove_ingredients(self):
         "JYP: need to fix when multiple foods can be added to a plate"
@@ -655,6 +660,7 @@ class ContainerState(object):
         self._ingredients = []
         self._cooking_tick = -1
         self._recipe = None
+        self.ingredient_string = ""
 
     def deepcopy(self):
         return ContainerState(self.name, self.position, [ingredient.deepcopy() for ingredient in self._ingredients], self._cooking_tick)
@@ -1263,25 +1269,25 @@ class OvercookedGridworld(object):
                     # If object in front of player, interact with the object there no matter what the platform underneath
                     if new_state.has_object(i_pos):
                         front_object = new_state.get_object(i_pos)
-                        # player: container, front: ingredient
                         mydebug(f"*player: {player_object}, front: {front_object}")
-                        if type(player_object) is ContainerState and type(front_object) is FoodState:
-                            mydebug(f"player: container, front: ingredient")
-                            if player_object.can_add([front_object.name]):
-                                old_container = player_object.deepcopy()
-                                ## Reward
-                                shaped_reward[player_idx] += self.shaped_reward_params["add_ingredient_to_container"]
-                                ## Log
-                                # self.log_food_to_container(events_infos, new_state, old_container, front_object, obj.name, player_idx)
-                                # if obj.name in CFG_ALL_INGREDIENTS:
-                                #     events_infos[f'potting_{obj.name}'][player_idx] = True
-                                ## Perform
-                                obj = new_state.remove_object(i_pos)
-                                player_object.add_ingredients([obj])
-                                obj = player.remove_object()
-                                new_state.add_object(obj, i_pos)
+                        # player: container, front: ingredient
+                        # if type(player_object) is ContainerState and type(front_object) is FoodState:
+                        #     mydebug(f"player: container, front: ingredient")
+                        #     if player_object.can_add([front_object.name]):
+                        #         old_container = player_object.deepcopy()
+                        #         ## Reward
+                        #         shaped_reward[player_idx] += self.shaped_reward_params["add_ingredient_to_container"]
+                        #         ## Log
+                        #         # self.log_food_to_container(events_infos, new_state, old_container, front_object, obj.name, player_idx)
+                        #         # if obj.name in CFG_ALL_INGREDIENTS:
+                        #         #     events_infos[f'potting_{obj.name}'][player_idx] = True
+                        #         ## Perform
+                        #         obj = new_state.remove_object(i_pos)
+                        #         player_object.add_ingredients([obj])
+                        #         obj = player.remove_object()
+                        #         new_state.add_object(obj, i_pos)
                         # player: ingredient, front: container
-                        elif type(player_object) is FoodState and type(front_object) is ContainerState:
+                        if type(player_object) is FoodState and type(front_object) is ContainerState:
                             mydebug(f"player: ingredient, front: container")
                             if front_object.can_add([player_object.name]):
                                 ## Reward
@@ -1297,14 +1303,14 @@ class OvercookedGridworld(object):
                         # player: container, front: container
                         elif type(player_object) is ContainerState and type(front_object) is ContainerState:
                             if not player_object.is_cooking and not front_object.is_cooking:
-                                if player_object.can_add(front_object.ingredients):
-                                    ## Reward
-                                    shaped_reward[player_idx] += self.shaped_reward_params["move_food_from_container"]
-                                    ## Log
-                                    ## Perform
-                                    ingredients = front_object.remove_ingredients()
-                                    player_object.add_ingredients(ingredients)
-                                elif front_object.can_add(player_object.ingredients):
+                                # if player_object.can_add(front_object.ingredients):
+                                #     ## Reward
+                                #     shaped_reward[player_idx] += self.shaped_reward_params["move_food_from_container"]
+                                #     ## Log
+                                #     ## Perform
+                                #     ingredients = front_object.remove_ingredients()
+                                #     player_object.add_ingredients(ingredients)
+                                if front_object.can_add(player_object.ingredients):
                                     ## Reward
                                     shaped_reward[player_idx] += self.shaped_reward_params["move_food_from_container"]
                                     ## Log
@@ -1508,10 +1514,6 @@ class OvercookedGridworld(object):
     def get_terrain_locations(self, terrain_type):
         return list(self.terrain_pos_dict[CFG_TERRAIN_TO_SYMBOL[terrain_type]])
 
-    def get_all_containers(self, state, ignore=[]):
-        """Returns a list of all container positions"""
-        return [obj for cont in CFG_ALL_CONTAINERS for obj in state.all_objects_by_type[cont] if cont not in ignore]
-
     def get_counter_objects_dict(self, state, counter_subset=None):
         """Returns a dictionary of pos:objects on counters by type"""
         if counter_subset is None:
@@ -1596,8 +1598,8 @@ class OvercookedGridworld(object):
             if value > 0:
                 value *= gamma**recipe.time
 
-                recipe_seq = [action.split(":")[0] for _, action in recipe.sequence]
-                base_recipe_seq = [action.split(":")[0] for _, action in base_recipe.sequence] if base_recipe else []
+                recipe_seq = [action[0] for _, action in recipe.sequence]
+                base_recipe_seq = [action[0] for _, action in base_recipe.sequence] if base_recipe else []
                 
                 for action in base_recipe_seq:
                     recipe_seq.remove(action)
@@ -1638,9 +1640,6 @@ class OvercookedGridworld(object):
                 curr_value = self.get_recipe_value(state, curr_recipe, base_recipe = start_recipe, discounted = discounted, potential_params = potential_params)
                 if curr_value > best_value:
                         best_value, best_recipe = curr_value, curr_recipe
-
-                if curr_value > 0:
-                    print(curr_recipe, curr_value)
 
                 for neighbor in curr_recipe.neighbors(): ## 현재 들어온 curr_recipe로 만들 수 있는 모든 food의 경우 반환 
                     if not neighbor in visited:
@@ -1908,9 +1907,6 @@ class OvercookedGridworld(object):
 
         """
 
-        def concat_dicts(a, b):
-            return {**a, **b}
-
         all_features = {}
 
         OBJ_TO_IDX = {name: idx for idx, name in enumerate(CFG_ALL_OBJECTS)}
@@ -2049,10 +2045,23 @@ class OvercookedGridworld(object):
         return type(obj) is ContainerState and CFG_CONTAINER_INFO[obj.name].get("deliverable") and self.get_recipe_value(state, obj.recipe) > 0
 
     def potential_function(self, state, mp, gamma=0.99):
+
+        def get_all_non_empty_containers(state, ignore=[]):
+            """Returns a list of all non-empty containers"""
+            all_containers = []
+            for cont_type in CFG_ALL_CONTAINERS:
+                for container in state.all_objects_by_type[cont_type]:
+                    if not cont_type in ignore and not container.is_empty:
+                        all_containers.append(container)
+            return all_containers
+
+        def get_all_containers_of_type(state, container_type):
+            """Returns a list of all containers of give type"""
+            return state.all_objects_by_type[container_type]
         
-        # Check if higher_cont is above the lower_cont
-        # i.e., having higher_cont makes lower_cont useless
-        def is_above(higher_cont, lower_cont):
+        def is_included(higher_cont, lower_cont):
+            """Check if higher_cont includes the lower_cont
+            i.e., having higher_cont makes lower_cont useless"""
             higher_seq = higher_cont.recipe.sequence
             lower_seq = lower_cont.recipe.sequence
             if len(lower_seq) >= len(higher_seq):
@@ -2067,42 +2076,33 @@ class OvercookedGridworld(object):
                     return True
             return False
 
-        # Constants needed for potential function
-        potential_params = {
-            "gamma" : gamma,
-            **CFG_POTENTIAL_CONSTANTS
-        }
+        def get_recipe_tree(recipe):
+            recipe_sequence = recipe.sequence
+            recipe_tree = []
+            for idx, (pidx, action) in enumerate(recipe_sequence):
+                child_indices = [cidx for cidx, (cpidx, _) in enumerate(recipe_sequence) if cpidx == idx]
+                recipe_tree.append((pidx, child_indices, action))
+            return recipe_tree
 
-        all_containers = []
-        for container in self.get_all_containers(state, ignore=["dish"]):
-            if container.is_empty:
-                continue
-            root_actions = [action for idx, action in container.recipe.sequence if idx == -1]
-            all_containers.append([container, root_actions])
+        def get_next_actions(recipe_tree, all_containers, current_container=None):
+            """Returns a list of actions that need to be done next assuming
+            all containers are used greedily. If current_container is set,
+            the current_container must also be part of the used containers.
+            Thus if some other container includes the current_container, the
+            other container will not be chosen."""
 
-        container_todo_list = []
-        for current_container, current_root_actions in all_containers:
-            optimal_recipe, optimal_value = self.get_optimal_possible_recipe(state, current_container.recipe, return_value=True)
-            if optimal_value <= 0:
-                continue
+            # Add root action of recipe to stack
+            stack = [recipe_tree[0]]
 
-            optimal_sequence = optimal_recipe.sequence
-            optimal_tree = []
-            for pidx, (_, action) in enumerate(optimal_sequence):
-                child_indices = [cidx for cidx, (cpidx, _) in enumerate(optimal_sequence) if cpidx == pidx]
-                optimal_tree.append([child_indices, action])
-
-            # Add root action of optimal recipe to stack
-            stack = [optimal_tree[0]]
-            todo_list = []
-
+            next_actions = []
+            later_actions = []
             used_containers_pos = []
             while stack:
-                child_indices, current_action = stack.pop()
+                parent_index, child_indices, current_action = stack.pop()
 
                 # If the current action has no child indices, it can be performed
                 if not child_indices:
-                    todo_list.append(current_action)
+                    next_actions.append((parent_index, current_action))
                     continue
 
                 best_container = None
@@ -2112,7 +2112,7 @@ class OvercookedGridworld(object):
                     if other_container.position in used_containers_pos:
                         continue
                     # If the other container is above the current container, ignore
-                    if not current_container.position in used_containers_pos and is_above(other_container, current_container):
+                    if current_container and current_container.position not in used_containers_pos and is_included(other_container, current_container):
                         continue
                     # Container should not be overdone
                     if len(other_root_actions) > len(child_indices):
@@ -2120,10 +2120,12 @@ class OvercookedGridworld(object):
 
                     # Find all child actions that are covered by this container
                     current_cover = []
+                    other_root_actions_copy = other_root_actions.copy()
                     for cidx in child_indices:
-                        _, child_action = optimal_tree[cidx]
-                        if child_action in other_root_actions:
+                        _, _, child_action = recipe_tree[cidx]
+                        if child_action in other_root_actions_copy:
                             current_cover.append(child_action)
+                            other_root_actions_copy.remove(child_action)
                             
                     # Check if this container covers better than previous containers
                     if len(current_cover) > len(best_cover):
@@ -2135,117 +2137,142 @@ class OvercookedGridworld(object):
 
                 # If all child actions are covered, current action can be performed
                 if len(best_cover) == len(child_indices):
-                    todo_list.append(current_action)
+                    next_actions.append((parent_index, current_action))
                 # Find child actions that aren't covered by the best container
                 else:
+                    later_actions.append((parent_index, current_action))
                     for cidx in child_indices:
-                        _, child_action = optimal_tree[cidx]
+                        _, _, child_action = recipe_tree[cidx]
                         if child_action not in best_cover:
-                            stack.append(optimal_tree[cidx])
+                            stack.append(recipe_tree[cidx])
                         else:
                             best_cover.remove(child_action)
                 # Mark this container as used
                 if best_container:
                     used_containers_pos.append(best_container.position)
 
-            container_todo_list.append([current_container, todo_list])
-            # print("-------")
-            # print("* ", current_container, todo_list)
+            return next_actions, later_actions
 
-        # print(container_todo_list)
-        # container_todo_list = [[]]
-        
-        for container, todo_list in container_todo_list:
-            used_players = []
-            for action in todo_list:
-                print("dddddddd:", todo_list )
+
+        def get_best_players(recipe_tree, next_actions, remaining_actions):
+            player_dists_per_action = []
+            for pidx, action in next_actions:
                 ## add 
-                action = ["add", "onion", "cuttingboard"]
                 if action[0] == "add":
-                    closest_dist = np.inf
-                    print("in add: ", action[0])
-                    chosen_player = None
-                    for player in state.players:
-                        if player in used_players:
-                            continue
-                        # to_conts = action[2].list^^
-                        to_conts = []
-                        for container in self.get_all_containers(state, ignore=["dish"]):
-                            if container.name == action[2]:
-                                to_conts.append(container)
-                        print("to_conts: ",to_conts)
-
-
-                        if player.held_object == None:
-                            dist = np.inf
-                            for to_cont in to_conts:
-                                # for pos_ingr in action[1].list^^ :
-                                # pos_ingrs = [obj for obj in state.all_objects_by_type[action[1]]]
-                                pos_ingrs = []
-                                for raw_ingr in self.get_terrain_locations(action[1]):
-                                    pos_ingrs.append(raw_ingr)
-                                for pos_ingr in pos_ingrs:
-                                    curr_dist = mp.min_cost_to_feature(player.pos_and_or, [pos_ingr]) # + mp.min_cost_to_feature(pos_ingr, to_cont)
-                                    print("1_curr_dist: ", curr_dist)
-                                    if dist > curr_dist:
-                                        dist = curr_dist
-                                if closest_dist > dist:
-                                    closest_dist = dist 
-                                    chosen_player = player
-                                            
-                        
-                        elif player.get_object().name == action[1]: # 만약 raw_ingr를 들고 있으면 
-                            dist = np.inf
-                            print("to_conts: ", to_conts)
-                            for to_cont in to_conts:
-                                print("to_cont",to_cont)
-                                curr_dist = mp.min_cost_to_feature(player.pos_and_or, [to_cont._position])
-                                print("2_curr_dist: ", curr_dist)
-                                if dist > curr_dist:
-                                    dist = curr_dist 
-                            if closest_dist > dist:
-                                closest_dist = dist 
-                                chosen_player = player
-
-                    discount = 1
-                    # discount *= gamma**min(closest_dist, potential_params[action[1]])
-                    discount *= gamma**min(closest_dist, 10)
-
-                    if chosen_player:
-                        used_players.append(chosen_player)
-                        print("chosen_players: ", chosen_player)
+                    from_candidates = self.get_terrain_locations(action[1]) + [obj.position for obj in state.unowned_objects_by_type[action[1]]]
+                    added_food = get_added_food(recipe_tree, remaining_actions, (pidx, action))
+                    to_candidates = []
+                    for cont in get_all_containers_of_type(state, action[2]):
+                        if cont.ingredient_string == added_food:
+                            to_candidates.append(cont.position)
+                    is_suitable = lambda obj: obj.name == action[1]
 
                 ## move
-                # if action[0] == "move":
-                #     closest_dist = np.inf
-                #     closest_player = None
-                #     for player in state.players:
-                #         if player in used_players:
-                #             continue
-                #         to_conts = action[3].list^^ 
+                if action[0] == "move":
+                    from_candidates = []
+                    for obj in state.all_objects_by_type[action[2]]:
+                        # Move action in recipe will always ask to move a single ingredient
+                        if len(obj.ingredients) == 1 and obj.ingredients[0] == action[1]:
+                            from_candidates.append(obj.position)
+                    added_food = get_added_food(recipe_tree, remaining_actions, (pidx, action))
+                    to_candidates = []
+                    for cont in get_all_containers_of_type(state, action[3]):
+                        if cont.ingredient_string == added_food:
+                            to_candidates.append(cont.position)
+                    is_suitable = lambda obj: obj.position in from_candidates
 
-                #         from_conts = [obj for obj in state.all_objects_by_type[action[2]]]
-                #         dist = np.inf
-                        
-                #         for from_cont in from_conts:
-                #             if player.get_object() == from_cont: 
-                #                 for to_cont in to_conts: 
-                #                     curr_dist = mp.min_cost_to_feature(player.pos_and_or, to_cont)
-                #                     if closest_dist > curr_dist:
-                #                         closest_dist = curr_dist 
-                #                         chosen_player = player 
-                            
-                #             elif player.held_object == None:
-                #                 for to_cont in to_conts: 
-                #                     curr_dist = mp.min_cost_to_feature(player.pos_and_or, from_cont) + mp.min_cost_to_feature(from_cont, to_cont)
-                #                     if closest_dist > curr_dist:
-                #                         closest_dist = curr_dist 
-                #                         chosen_player = player
-                #     discount *= gamma**min(closest_dist, potential_params[action[1]])
-                #     if chosen_player:
-                #         used_players.append(chosen_player)                
+                ## cook
+                if action[0] == "cook":
+                    from_candidates = []
+                    for obj in state.all_objects_by_type[action[1]]:
+                        if len(obj.ingredients) == 1 and obj.ingredient_string == action[2]:
+                            from_candidates.append(obj.position)
+                    to_candidates = []
+                    for terrain_type, activate_objects in CFG_STATION_INFO.items():
+                        if action[1] in activate_objects:
+                            to_candidates += self.get_terrain_locations(terrain_type)
+                    is_suitable = lambda obj: obj.position in from_candidates
 
+                player_dists = []
+                for player in state.players:
+                    best_dist = np.inf
+                    if player.has_object() and is_suitable(player.get_object()):
+                        best_dist = mp.min_cost_to_feature(player.pos_and_or, to_candidates)
+                    elif not player.has_object():
+                        for from_item in from_candidates:
+                            curr_dist, best_goal = mp.min_cost_to_feature(player.pos_and_or, [from_item], return_goal=True)
+                            curr_dist += mp.min_cost_to_feature(best_goal, to_candidates)
+                            best_dist = min(curr_dist, best_dist)
+                    player_dists.append(best_dist)
+                player_dists_per_action.append(player_dists)
+
+            player_dists_per_action = np.array(player_dists_per_action)
+            best_player_dist = get_best_assignment(player_dists_per_action)
+
+            return best_player_dist
+
+        def get_added_food(recipe_tree, remaining_actions, current_action):
+            curr_idx, curr_action = current_action
+            siblings = [action for pidx, _, action in recipe_tree if pidx == curr_idx and action != curr_action]
+            remaining_action_siblings = [action for pidx, action in remaining_actions if pidx == curr_idx and action != curr_action]
+            added_food = []
+            for action in siblings:
+                if action in remaining_action_siblings:
+                    remaining_action_siblings.remove(action)
+                else:
+                    added_food.append(action[1])
+            return ", ".join(sorted(added_food))
+
+        # Constants needed for potential function
+        potential_params = {
+            "gamma" : gamma,
+            **CFG_POTENTIAL_CONSTANTS
+        }
                     
+
+        all_containers = []
+        for container in get_all_non_empty_containers(state, ignore=["dish"]):
+            root_actions = [action for idx, action in container.recipe.sequence if idx == -1]
+            all_containers.append([container, root_actions])
+
+        for current_container, _ in all_containers:
+            optimal_recipe, recipe_value = self.get_optimal_possible_recipe(state, current_container.recipe, return_value=True)
+            if recipe_value > 0:
+                recipe_tree = get_recipe_tree(optimal_recipe)
+                next_actions, later_actions = get_next_actions(recipe_tree, all_containers, current_container)
+                best_player_dist = get_best_players(recipe_tree, next_actions, next_actions+later_actions)
+                print(current_container, next_actions, best_player_dist)
+                # container_potential = get_container_potential(optimal_recipe, current_container, next_actions, remaining_actions, best_player_dist)
+
+                # disc_container_potential = 0
+                # disc_optimal_recipe, recipe_value = self.get_optimal_possible_recipe(state, current_container.recipe, discounted=True, potential_params=potential_params, return_value=True)
+                # if disc_optimal_recipe != optimal_recipe and recipe_value > 0:
+                #     disc_next_actions, disc_remaining_actions = get_next_actions(disc_optimal_recipe, all_containers, current_container)
+                #     disc_chosen_players = get_best_players(disc_next_actions)
+                #     disc_container_potential = get_container_potential(disc_optimal_recipe, current_container, disc_next_actions, disc_remaining_actions, disc_chosen_players)
+
+                # potential += max(container_potential, disc_container_potential)
+
+
+
+        def get_container_potential(recipe, container, next_actions, remaining_actions, chosen_players):
+            assert len(next_actions) == len(chosen_players)
+
+            # Get maximum recipe value
+            value = self.get_recipe_value(state, recipe, discounted=False)
+
+            # Discount by remaining time
+            value *= gamma**(recipe.time - container.recipe.time)
+
+            for i, action in enumerate(next_actions):
+                player = chosen_players[i]
+                if player:
+                    pass
+                else:
+                    value *= gamma**(max(potential_params['max_pickup_steps'], opt_recipe.time) + potential_params['max_delivery_steps'])
+                    value *= gamma**min(dist, potential_params['pot_{}_steps'.format(ingredient)])
+
+
 
         '''
         TODO:

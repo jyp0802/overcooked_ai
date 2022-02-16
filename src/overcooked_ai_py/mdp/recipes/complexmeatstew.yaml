@@ -11,16 +11,16 @@ max_num_ingredients: 3
 
 terrain_info:
   tomato:
-    placeable: true
+    placeable: false
     dispenser: true
   onion:
-    placeable: true
+    placeable: false
     dispenser: true
   meat:
-    placeable: true
+    placeable: false
     dispenser: true
   dish:
-    placeable: true
+    placeable: false
     dispenser: true
   deliver:
     placeable: false
@@ -101,13 +101,6 @@ potential_constants:
     move: 10
     add: 10
   max_delivery_steps: 10
-
-default_potential:
-  onion: 10
-  tomato: 10
-  onionsoup: 20
-  tomatosoup: 20
-  oniontomatosoup: 30
 
 default_recipe_value: 17
 default_recipe_time: 17
