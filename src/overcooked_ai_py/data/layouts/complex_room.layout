@@ -1,9 +1,9 @@
 {
     "grid":  """X XcM SfSpX X 
                 O           T 
-                X   1       B 
+                Xp  1       B 
                 X X D X _ X X """,
-    "start_all_orders" : ["onionsoup", "tomatosoup", "oniontomatosoup", "meatstew"],
+    "start_all_orders" : ["onionsoup", "tomatosoup", "oniontomatosoup", "meatstew", "food"],
     "start_bonus_orders": [],
     "shaped_reward_params": None
 }

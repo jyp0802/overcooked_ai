@@ -4,15 +4,14 @@ raw_foods:
   onion:
     value: 10
 
-
-max_num_ingredients: 3
+max_num_ingredients: 2
 
 terrain_info:
   tomato:
-    placeable: true
+    placeable: false
     dispenser: true
   onion:
-    placeable: true
+    placeable: false
     dispenser: true
   dish:
     placeable: true
@@ -47,39 +46,13 @@ container_info:
   dish:
     cook_time: 0
     max_ingredients: 1
-    can_add: ["onionsoup", "tomatosoup", "oniontomatosoup"]
+    can_add: ["oniontomatosoup"]
     deliverable: true
   pot:
     cook_time: 30
-    max_ingredients: 3
+    max_ingredients: 2
     can_add: ["tomato", "onion"]
 
 recipe_info: [
-  ["onion", "pot", "onionsoup"],
-  ["tomato", "pot", "tomatosoup"],
   ["onion, tomato", "pot", "oniontomatosoup"],
 ]
-
-
-
-
-shaped_reward:
-  add_ingredient_to_container: 3
-  move_food_from_container: 5
-  throw_away_food: 1
-  throw_away_container: -3
-  place_object: 2
-  pickup_dispenser: 1
-  pickup_object: 2
-  start_cooking: 10
-
-potential_constants:
-  action_potentials:
-    pot: 10
-    move: 10
-    add: 10
-  max_delivery_steps: 10
-  max_pickup_steps: 10
-
-default_recipe_value: 17
-default_recipe_time: 17

@@ -6,7 +6,6 @@ raw_foods:
   meat:
     value: 10
 
-
 max_num_ingredients: 3
 
 terrain_info:
@@ -57,12 +56,12 @@ container_info:
   dish:
     cook_time: 0
     max_ingredients: 1
-    can_add: ["onionsoup", "tomatosoup", "oniontomatosoup", "meatstew"]
+    can_add: ["onionsoup", "tomatosoup", "oniontomatosoup", "meatstew", "food"]
     deliverable: true
   pot:
     cook_time: 30
     max_ingredients: 3
-    can_add: ["tomato", "cutonion", "friedmeat", "oniontomatosoup"]
+    can_add: ["tomato", "cutonion", "friedmeat", "oniontomatosoup", "meatstew"]
   fryingpan:
     cook_time: 15
     max_ingredients: 1
@@ -80,27 +79,6 @@ recipe_info: [
   ["meat", "cuttingboard", "cutmeat"],
   ["cutmeat", "fryingpan", "friedmeat"],
   ["cutonion, friedmeat, tomato", "pot", "meatstew"],
+  ["meatstew, oniontomatosoup", "pot", "food"],
+  # ["meatstew, tomato", "pot", "food"],
 ]
-
-
-shaped_reward:
-  add_ingredient_to_container: 3
-  move_food_from_container: 5
-  throw_away_food: 1
-  throw_away_container: -3
-  place_object: 2
-  pickup_dispenser: 1
-  pickup_object: 2
-  start_cooking: 10
-
-potential_constants:
-  action_potentials:
-    pot: 10
-    fryingpan: 10
-    cuttingboard: 10
-    move: 10
-    add: 10
-  max_delivery_steps: 10
-
-default_recipe_value: 17
-default_recipe_time: 17

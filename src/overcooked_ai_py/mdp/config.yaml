@@ -1,1 +1,21 @@
 recipe: "complexmeatstew"
+
+shaped_reward:
+  add_ingredient_to_container: 3
+  move_food_from_container: 5
+  throw_away_food: 1
+  throw_away_container: -3
+  place_object: 2
+  pickup_dispenser: 1
+  pickup_object: 2
+  start_cooking: 10
+
+potential_constants:
+  action_potentials:
+    cook: 20
+    move: 20
+    add: 20
+  max_delivery_steps: 20
+
+default_recipe_value: 17
+default_recipe_time: 17

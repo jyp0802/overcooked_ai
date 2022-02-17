@@ -3,7 +3,7 @@ import numpy as np
 import yaml, os
 import threading
 from functools import reduce
-from collections import defaultdict, Counter
+from collections import defaultdict, Counter, Mapping
 from overcooked_ai_py.utils import pos_distance, read_layout_dict, classproperty
 from overcooked_ai_py.mdp.actions import Action, Direction
 from overcooked_ai_py.mdp.hungarian import get_best_assignment
@@ -11,7 +11,7 @@ from overcooked_ai_py.mdp.hungarian import get_best_assignment
 def mydebug(msg):
     if type(msg) == list:
         msg = ", ".join([str(x) for x in msg])
-    # print("!!", msg)
+    print("!!", msg)
 
 '''
 TODO:
@@ -41,10 +41,25 @@ serving:
     # GET ALL CONFIG INFO #
     #######################
 
+
+def deep_update(source, overrides):
+    """
+    Update a nested dictionary or similar mapping.
+    Modify ``source`` in place.
+    """
+    for key, value in overrides.items():
+        if isinstance(value, Mapping) and value:
+            returned = deep_update(source.get(key, {}), value)
+            source[key] = returned
+        else:
+            source[key] = overrides[key]
+    return source
+
 curr_file_dir = os.path.dirname(os.path.abspath(__file__))
 
-recipe_name = yaml.safe_load(open(os.path.join(curr_file_dir, "config.yaml"), "r"))["recipe"]
-config = yaml.safe_load(open(os.path.join(curr_file_dir, "recipes", f"{recipe_name}.yaml"), "r"))
+config = yaml.safe_load(open(os.path.join(curr_file_dir, "config.yaml"), "r"))
+config_custom = yaml.safe_load(open(os.path.join(curr_file_dir, "recipes", f"{config['recipe']}.yaml"), "r"))
+deep_update(config, config_custom)
 
 #### Potential_Constant
 CFG_POTENTIAL_CONSTANTS = config['potential_constants']
@@ -613,10 +628,12 @@ class ContainerState(object):
         return True
 
     def can_add(self, ingredient_list):
-        if self.is_full or self.is_ready or len(self.ingredients) + len(ingredient_list) > self.max_ingredients:
+        if self.is_full or len(self.ingredients) + len(ingredient_list) > self.max_ingredients:
             return False
         can_add_list = CFG_CONTAINER_INFO[self.name].get("can_add", [])
         if any(ingredient not in can_add_list for ingredient in ingredient_list):
+            return False
+        if self.is_ready and any(ingredient not in can_add_list for ingredient in self.ingredients):
             return False
         return True
 
@@ -630,6 +647,7 @@ class ContainerState(object):
             self._ingredients.append(ingredient)
         self.ingredient_string = ", ".join(sorted(self.ingredients))
         self._recipe = None
+        self._cooking_tick = -1
 
     def begin_cooking(self):
         if not self.is_idle:
@@ -1601,11 +1619,11 @@ class OvercookedGridworld(object):
                 recipe_seq = [action[0] for _, action in recipe.sequence]
                 base_recipe_seq = [action[0] for _, action in base_recipe.sequence] if base_recipe else []
                 
-                for action in base_recipe_seq:
-                    recipe_seq.remove(action)
+                for action_name in base_recipe_seq:
+                    recipe_seq.remove(action_name)
 
-                for action in recipe_seq:
-                    value *= gamma**potential_params["action_potentials"][action]
+                for action_name in recipe_seq:
+                    value *= gamma**potential_params["action_potentials"][action_name]
 
             return value
 
@@ -2054,10 +2072,6 @@ class OvercookedGridworld(object):
                     if not cont_type in ignore and not container.is_empty:
                         all_containers.append(container)
             return all_containers
-
-        def get_all_containers_of_type(state, container_type):
-            """Returns a list of all containers of give type"""
-            return state.all_objects_by_type[container_type]
         
         def is_included(higher_cont, lower_cont):
             """Check if higher_cont includes the lower_cont
@@ -2075,6 +2089,18 @@ class OvercookedGridworld(object):
                 if found:
                     return True
             return False
+
+        def get_added_food(recipe_tree, remaining_actions, current_action):
+            curr_idx, curr_action = current_action
+            siblings = [action for pidx, _, action in recipe_tree if pidx == curr_idx and action != curr_action]
+            remaining_action_siblings = [action for pidx, action in remaining_actions if pidx == curr_idx and action != curr_action]
+            added_food = []
+            for action in siblings:
+                if action in remaining_action_siblings:
+                    remaining_action_siblings.remove(action)
+                else:
+                    added_food.append(action[1])
+            return ", ".join(sorted(added_food))
 
         def get_recipe_tree(recipe):
             recipe_sequence = recipe.sequence
@@ -2162,7 +2188,7 @@ class OvercookedGridworld(object):
                     from_candidates = self.get_terrain_locations(action[1]) + [obj.position for obj in state.unowned_objects_by_type[action[1]]]
                     added_food = get_added_food(recipe_tree, remaining_actions, (pidx, action))
                     to_candidates = []
-                    for cont in get_all_containers_of_type(state, action[2]):
+                    for cont in state.unowned_objects_by_type[action[2]]:
                         if cont.ingredient_string == added_food:
                             to_candidates.append(cont.position)
                     is_suitable = lambda obj: obj.name == action[1]
@@ -2170,28 +2196,29 @@ class OvercookedGridworld(object):
                 ## move
                 if action[0] == "move":
                     from_candidates = []
-                    for obj in state.all_objects_by_type[action[2]]:
+                    for obj in state.unowned_objects_by_type[action[2]]:
                         # Move action in recipe will always ask to move a single ingredient
                         if len(obj.ingredients) == 1 and obj.ingredients[0] == action[1]:
                             from_candidates.append(obj.position)
                     added_food = get_added_food(recipe_tree, remaining_actions, (pidx, action))
                     to_candidates = []
-                    for cont in get_all_containers_of_type(state, action[3]):
+                    for cont in state.unowned_objects_by_type[action[3]]:
                         if cont.ingredient_string == added_food:
                             to_candidates.append(cont.position)
-                    is_suitable = lambda obj: obj.position in from_candidates
+                    is_suitable = lambda obj: type(obj) is ContainerState and len(obj.ingredients) == 1 and obj.ingredients[0] == action[1]
 
                 ## cook
                 if action[0] == "cook":
                     from_candidates = []
-                    for obj in state.all_objects_by_type[action[1]]:
-                        if len(obj.ingredients) == 1 and obj.ingredient_string == action[2]:
+                    for obj in state.unowned_objects_by_type[action[1]]:
+                        # if len(obj.ingredients) == 1 and obj.ingredient_string == action[2]:
+                        if obj.ingredient_string == action[2]:
                             from_candidates.append(obj.position)
                     to_candidates = []
                     for terrain_type, activate_objects in CFG_STATION_INFO.items():
                         if action[1] in activate_objects:
                             to_candidates += self.get_terrain_locations(terrain_type)
-                    is_suitable = lambda obj: obj.position in from_candidates
+                    is_suitable = lambda obj: type(obj) is ContainerState and obj.ingredient_string == action[2]
 
                 player_dists = []
                 for player in state.players:
@@ -2210,79 +2237,78 @@ class OvercookedGridworld(object):
             best_player_dist = get_best_assignment(player_dists_per_action)
 
             return best_player_dist
+        
+        def get_container_potential(recipe, container, next_actions, later_actions, best_player_dist):
+            assert len(next_actions) == len(best_player_dist)
+            print("next_actions: ", next_actions)
+            print("recipe_tree: ", recipe_tree)
+            # Get maximum recipe value
+            potential = self.get_recipe_value(state, recipe, discounted=False)
 
-        def get_added_food(recipe_tree, remaining_actions, current_action):
-            curr_idx, curr_action = current_action
-            siblings = [action for pidx, _, action in recipe_tree if pidx == curr_idx and action != curr_action]
-            remaining_action_siblings = [action for pidx, action in remaining_actions if pidx == curr_idx and action != curr_action]
-            added_food = []
-            for action in siblings:
-                if action in remaining_action_siblings:
-                    remaining_action_siblings.remove(action)
+            # Discount by remaining time
+            potential *= gamma**(recipe.time - container.recipe.time)
+
+            for i, (_, action) in enumerate(next_actions):
+                if best_player_dist[i]:
+                    potential *= gamma**best_player_dist[i]
                 else:
-                    added_food.append(action[1])
-            return ", ".join(sorted(added_food))
+                    potential *= gamma**potential_params["action_potentials"][action[0]]
+
+            for i, (_, action) in enumerate(later_actions):
+                potential *= gamma**potential_params["action_potentials"][action[0]]
+
+            return potential
+
+
 
         # Constants needed for potential function
         potential_params = {
             "gamma" : gamma,
             **CFG_POTENTIAL_CONSTANTS
         }
-                    
+
+        potential = 0         
 
         all_containers = []
-        for container in get_all_non_empty_containers(state, ignore=["dish"]):
+        for container in get_all_non_empty_containers(state):
             root_actions = [action for idx, action in container.recipe.sequence if idx == -1]
             all_containers.append([container, root_actions])
 
+        num_containers = len(all_containers)
+        #JHJ
+        container_potential = 0
         for current_container, _ in all_containers:
             optimal_recipe, recipe_value = self.get_optimal_possible_recipe(state, current_container.recipe, return_value=True)
             if recipe_value > 0:
-                recipe_tree = get_recipe_tree(optimal_recipe)
-                next_actions, later_actions = get_next_actions(recipe_tree, all_containers, current_container)
-                best_player_dist = get_best_players(recipe_tree, next_actions, next_actions+later_actions)
-                print(current_container, next_actions, best_player_dist)
-                # container_potential = get_container_potential(optimal_recipe, current_container, next_actions, remaining_actions, best_player_dist)
-
-                # disc_container_potential = 0
-                # disc_optimal_recipe, recipe_value = self.get_optimal_possible_recipe(state, current_container.recipe, discounted=True, potential_params=potential_params, return_value=True)
-                # if disc_optimal_recipe != optimal_recipe and recipe_value > 0:
-                #     disc_next_actions, disc_remaining_actions = get_next_actions(disc_optimal_recipe, all_containers, current_container)
-                #     disc_chosen_players = get_best_players(disc_next_actions)
-                #     disc_container_potential = get_container_potential(disc_optimal_recipe, current_container, disc_next_actions, disc_remaining_actions, disc_chosen_players)
-
-                # potential += max(container_potential, disc_container_potential)
-
-
-
-        def get_container_potential(recipe, container, next_actions, remaining_actions, chosen_players):
-            assert len(next_actions) == len(chosen_players)
-
-            # Get maximum recipe value
-            value = self.get_recipe_value(state, recipe, discounted=False)
-
-            # Discount by remaining time
-            value *= gamma**(recipe.time - container.recipe.time)
-
-            for i, action in enumerate(next_actions):
-                player = chosen_players[i]
-                if player:
-                    pass
+                if optimal_recipe == current_container.recipe:  
+                    container_potential = recipe_value
                 else:
-                    value *= gamma**(max(potential_params['max_pickup_steps'], opt_recipe.time) + potential_params['max_delivery_steps'])
-                    value *= gamma**min(dist, potential_params['pot_{}_steps'.format(ingredient)])
+                    recipe_tree = get_recipe_tree(optimal_recipe)
+                    next_actions, later_actions = get_next_actions(recipe_tree, all_containers, current_container)
+                    best_player_dist = get_best_players(recipe_tree, next_actions, next_actions+later_actions)
+                    container_potential = get_container_potential(optimal_recipe, current_container, next_actions, later_actions, best_player_dist)
+                # print(1, current_container, optimal_recipe, f"{container_potential:.2f}")
 
+                disc_optimal_recipe, disc_recipe_value = self.get_optimal_possible_recipe(state, current_container.recipe, discounted=True, potential_params=potential_params, return_value=True)
+                disc_container_potential = 0
+                if disc_recipe_value > 0:
+                    if disc_optimal_recipe == current_container.recipe:
+                        disc_container_potential = disc_recipe_value
+                    else:
+                        recipe_tree = get_recipe_tree(disc_optimal_recipe)
+                        next_actions, later_actions = get_next_actions(recipe_tree, all_containers, current_container)
+                        best_player_dist = get_best_players(recipe_tree, next_actions, next_actions+later_actions)
+                        disc_container_potential = get_container_potential(disc_optimal_recipe, current_container, next_actions, later_actions, best_player_dist)
+                        disc_container_potential = get_container_potential(disc_optimal_recipe, current_container, next_actions, later_actions, best_player_dist)
+                    # print(2, current_container, disc_optimal_recipe, f"{disc_container_potential:.2f}")
 
+                potential += max(container_potential, disc_container_potential)
 
-        '''
-        TODO:
-        1. * add containers held by players as well
-        2. * ignore container above current container
-        3. find best player to do each todo_action
-        4. calculate discounted potential
+            print(current_container, optimal_recipe, recipe_value, container_potential)
 
-        5. containers (dishes) that are already optimal are counted separately
-        '''
+        if potential:
+            potential /= num_containers
+            potential = round(potential, 2)
 
-        return 0
+        return potential
 
