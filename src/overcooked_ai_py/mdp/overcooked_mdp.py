@@ -11,7 +11,7 @@ from overcooked_ai_py.mdp.hungarian import get_best_assignment
 def mydebug(msg):
     if type(msg) == list:
         msg = ", ".join([str(x) for x in msg])
-    print("!!", msg)
+    # print("!!", msg)
 
 '''
 TODO:
@@ -2211,7 +2211,6 @@ class OvercookedGridworld(object):
                 if action[0] == "cook":
                     from_candidates = []
                     for obj in state.unowned_objects_by_type[action[1]]:
-                        # if len(obj.ingredients) == 1 and obj.ingredient_string == action[2]:
                         if obj.ingredient_string == action[2]:
                             from_candidates.append(obj.position)
                     to_candidates = []
@@ -2240,8 +2239,6 @@ class OvercookedGridworld(object):
         
         def get_container_potential(recipe, container, next_actions, later_actions, best_player_dist):
             assert len(next_actions) == len(best_player_dist)
-            print("next_actions: ", next_actions)
-            print("recipe_tree: ", recipe_tree)
             # Get maximum recipe value
             potential = self.get_recipe_value(state, recipe, discounted=False)
 
@@ -2259,8 +2256,6 @@ class OvercookedGridworld(object):
 
             return potential
 
-
-
         # Constants needed for potential function
         potential_params = {
             "gamma" : gamma,
@@ -2275,8 +2270,6 @@ class OvercookedGridworld(object):
             all_containers.append([container, root_actions])
 
         num_containers = len(all_containers)
-        #JHJ
-        container_potential = 0
         for current_container, _ in all_containers:
             optimal_recipe, recipe_value = self.get_optimal_possible_recipe(state, current_container.recipe, return_value=True)
             if recipe_value > 0:
@@ -2287,10 +2280,9 @@ class OvercookedGridworld(object):
                     next_actions, later_actions = get_next_actions(recipe_tree, all_containers, current_container)
                     best_player_dist = get_best_players(recipe_tree, next_actions, next_actions+later_actions)
                     container_potential = get_container_potential(optimal_recipe, current_container, next_actions, later_actions, best_player_dist)
-                # print(1, current_container, optimal_recipe, f"{container_potential:.2f}")
 
-                disc_optimal_recipe, disc_recipe_value = self.get_optimal_possible_recipe(state, current_container.recipe, discounted=True, potential_params=potential_params, return_value=True)
                 disc_container_potential = 0
+                disc_optimal_recipe, disc_recipe_value = self.get_optimal_possible_recipe(state, current_container.recipe, discounted=True, potential_params=potential_params, return_value=True)
                 if disc_recipe_value > 0:
                     if disc_optimal_recipe == current_container.recipe:
                         disc_container_potential = disc_recipe_value
@@ -2300,11 +2292,8 @@ class OvercookedGridworld(object):
                         best_player_dist = get_best_players(recipe_tree, next_actions, next_actions+later_actions)
                         disc_container_potential = get_container_potential(disc_optimal_recipe, current_container, next_actions, later_actions, best_player_dist)
                         disc_container_potential = get_container_potential(disc_optimal_recipe, current_container, next_actions, later_actions, best_player_dist)
-                    # print(2, current_container, disc_optimal_recipe, f"{disc_container_potential:.2f}")
 
                 potential += max(container_potential, disc_container_potential)
-
-            print(current_container, optimal_recipe, recipe_value, container_potential)
 
         if potential:
             potential /= num_containers
