@@ -17,24 +17,10 @@ def mydebug(msg):
 TODO:
 * change .format to f'strings'
 * separate game logic and RL logic
-* add 'activate' action
 
-ingredients:
-- tomato, onion, mushroom
-- bread, cheese, meat
-- rice, seaweed, fish, cucumber
-- flour, chocolate, strawberry
-- pasta, shrimp
-- potato, chicken
-
-utensil:
-- pot, cutting board
-- frying pan
-- mixer, oven
-- fryer
-
-serving:
-- plate, sink
+potential:
+is_cooking -> but not on stove?
+# why potential doesn't go down when i pick up pot while it hasn't been cooked
 '''
 
     #######################
@@ -264,10 +250,7 @@ class Recipe:
                 sub_foods = sub_foods.split(", ")
                 stack += sub_foods
                 all_time += CFG_CONTAINER_INFO[cont]["cook_time"]
-        if all_time > 0:
-            self.time_cache = all_time
-        else:
-            self.time_cache = CFG_DEFAULT_RECIPE_TIME
+        self.time_cache = all_time
         return self.time_cache
 
     @property
@@ -459,11 +442,10 @@ class Recipe:
         return cls(**obj_dict)
 
     @classmethod
-    def cooked_food_name(cls, ingredient_names, container_name):
-        ingredient_str = ", ".join(sorted(ingredient_names))
-        if (ingredient_str, container_name) not in CFG_RECIPE_12_3:
+    def cooked_food_name(cls, ingredient_string, container_name):
+        if (ingredient_string, container_name) not in CFG_RECIPE_12_3:
             return "trash"
-        return CFG_RECIPE_12_3[(ingredient_str, container_name)]
+        return CFG_RECIPE_12_3[(ingredient_string, container_name)]
 
 
 class FoodState(object):
@@ -663,7 +645,7 @@ class ContainerState(object):
             self._cooking_tick += 1
             if self._cooking_tick == self.cook_time:
                 mydebug("Cook done")
-                cooked_food_name = Recipe.cooked_food_name(self.ingredients, self.name)
+                cooked_food_name = Recipe.cooked_food_name(self.ingredient_string, self.name)
                 self._ingredients = [FoodState(cooked_food_name, self.position)]
                 self._recipe = None
                 self.ingredient_string = ", ".join(sorted(self.ingredients))
@@ -2078,7 +2060,7 @@ class OvercookedGridworld(object):
             i.e., having higher_cont makes lower_cont useless"""
             higher_seq = higher_cont.recipe.sequence
             lower_seq = lower_cont.recipe.sequence
-            if len(lower_seq) >= len(higher_seq):
+            if len(lower_seq) > len(higher_seq):
                 return False
             for i in range(len(higher_seq)):
                 found = True
@@ -2110,7 +2092,7 @@ class OvercookedGridworld(object):
                 recipe_tree.append((pidx, child_indices, action))
             return recipe_tree
 
-        def get_next_actions(recipe_tree, all_containers, current_container=None):
+        def get_next_actions(recipe_tree, all_containers, current_container):
             """Returns a list of actions that need to be done next assuming
             all containers are used greedily. If current_container is set,
             the current_container must also be part of the used containers.
@@ -2120,11 +2102,33 @@ class OvercookedGridworld(object):
             # Add root action of recipe to stack
             stack = [recipe_tree[0]]
 
+            doing_actions = []
             next_actions = []
             later_actions = []
             used_containers_pos = []
             while stack:
                 parent_index, child_indices, current_action = stack.pop()
+
+                best_container = None
+                best_cooking_tick = 0
+                for other_container, other_root_actions in all_containers:
+                    if not other_container.is_cooking:
+                        continue
+                    # Don't use containers that are alread used
+                    if other_container.position in used_containers_pos:
+                        continue
+                    # If the other container is above the current container, ignore
+                    if current_container.position != other_container.position and current_container.position not in used_containers_pos and is_included(other_container, current_container):
+                        continue
+
+                    if current_action == ("cook", other_container.name, other_container.ingredient_string):
+                        if other_container._cooking_tick > best_cooking_tick:
+                            best_cooking_tick = other_container._cooking_tick
+                            best_container = other_container
+                if best_container:
+                    used_containers_pos.append(best_container.position)
+                    doing_actions.append((parent_index, current_action, best_cooking_tick))
+                    continue
 
                 # If the current action has no child indices, it can be performed
                 if not child_indices:
@@ -2138,7 +2142,7 @@ class OvercookedGridworld(object):
                     if other_container.position in used_containers_pos:
                         continue
                     # If the other container is above the current container, ignore
-                    if current_container and current_container.position not in used_containers_pos and is_included(other_container, current_container):
+                    if current_container.position != other_container.position and current_container.position not in used_containers_pos and is_included(other_container, current_container):
                         continue
                     # Container should not be overdone
                     if len(other_root_actions) > len(child_indices):
@@ -2177,10 +2181,13 @@ class OvercookedGridworld(object):
                 if best_container:
                     used_containers_pos.append(best_container.position)
 
-            return next_actions, later_actions
+            return doing_actions, next_actions, later_actions
 
 
         def get_best_players(recipe_tree, next_actions, remaining_actions):
+            if not next_actions:
+                return []
+
             player_dists_per_action = []
             for pidx, action in next_actions:
                 ## add 
@@ -2237,13 +2244,16 @@ class OvercookedGridworld(object):
 
             return best_player_dist
         
-        def get_container_potential(recipe, container, next_actions, later_actions, best_player_dist):
+        def get_container_potential(recipe, container, doing_actions, next_actions, later_actions, best_player_dist):
             assert len(next_actions) == len(best_player_dist)
             # Get maximum recipe value
             potential = self.get_recipe_value(state, recipe, discounted=False)
 
             # Discount by remaining time
-            potential *= gamma**(recipe.time - container.recipe.time)
+            remaining_time = recipe.time - container.recipe.time
+            for _, _, cooking_tick in doing_actions:
+                remaining_time -= cooking_tick
+            potential *= gamma**remaining_time
 
             for i, (_, action) in enumerate(next_actions):
                 if best_player_dist[i]:
@@ -2277,9 +2287,9 @@ class OvercookedGridworld(object):
                     container_potential = recipe_value
                 else:
                     recipe_tree = get_recipe_tree(optimal_recipe)
-                    next_actions, later_actions = get_next_actions(recipe_tree, all_containers, current_container)
+                    doing_actions, next_actions, later_actions = get_next_actions(recipe_tree, all_containers, current_container)
                     best_player_dist = get_best_players(recipe_tree, next_actions, next_actions+later_actions)
-                    container_potential = get_container_potential(optimal_recipe, current_container, next_actions, later_actions, best_player_dist)
+                    container_potential = get_container_potential(optimal_recipe, current_container, doing_actions, next_actions, later_actions, best_player_dist)
 
                 disc_container_potential = 0
                 disc_optimal_recipe, disc_recipe_value = self.get_optimal_possible_recipe(state, current_container.recipe, discounted=True, potential_params=potential_params, return_value=True)
@@ -2288,12 +2298,12 @@ class OvercookedGridworld(object):
                         disc_container_potential = disc_recipe_value
                     else:
                         recipe_tree = get_recipe_tree(disc_optimal_recipe)
-                        next_actions, later_actions = get_next_actions(recipe_tree, all_containers, current_container)
+                        doing_actions, next_actions, later_actions = get_next_actions(recipe_tree, all_containers, current_container)
                         best_player_dist = get_best_players(recipe_tree, next_actions, next_actions+later_actions)
-                        disc_container_potential = get_container_potential(disc_optimal_recipe, current_container, next_actions, later_actions, best_player_dist)
-                        disc_container_potential = get_container_potential(disc_optimal_recipe, current_container, next_actions, later_actions, best_player_dist)
+                        disc_container_potential = get_container_potential(disc_optimal_recipe, current_container, doing_actions, next_actions, later_actions, best_player_dist)
 
                 potential += max(container_potential, disc_container_potential)
+                # print(current_container, doing_actions, next_actions, later_actions)
 
         if potential:
             potential /= num_containers
