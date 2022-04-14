@@ -21,6 +21,7 @@ TODO:
 potential:
 is_cooking -> but not on stove?
 # why potential doesn't go down when i pick up pot while it hasn't been cooked
+encourage throwing away trash
 '''
 
     #######################

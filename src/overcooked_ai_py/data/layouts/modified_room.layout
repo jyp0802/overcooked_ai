@@ -1,7 +1,7 @@
 {
     "grid":  """X X SpX X 
-                O 1   2 T 
-                X       X 
+                O 1     T 
+                X   2   X 
                 X D B _ X """,
     "start_all_orders" : ["oniontomatosoup"],
     "start_bonus_orders": [],

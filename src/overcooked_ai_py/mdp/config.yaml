@@ -1,4 +1,4 @@
-recipe: "complexmeatstew"
+recipe: "oniontomatosoup"
 
 shaped_reward:
   add_ingredient_to_container: 3
@@ -12,7 +12,7 @@ shaped_reward:
 
 potential_constants:
   action_potentials:
-    cook: 20
+    cook: 50
     move: 20
     add: 20
   max_delivery_steps: 20

@@ -80,5 +80,4 @@ recipe_info: [
   ["cutmeat", "fryingpan", "friedmeat"],
   ["cutonion, friedmeat, tomato", "pot", "meatstew"],
   ["meatstew, oniontomatosoup", "pot", "food"],
-  # ["meatstew, tomato", "pot", "food"],
 ]
