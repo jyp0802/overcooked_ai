@@ -1,0 +1,10 @@
+{
+    "grid":  """X X X SpX XdX 
+                O           T 
+                X 1       2 X 
+                X           X 
+                X D X B X _ X """,
+    "start_all_orders" : ["oniontomatosoup"],
+    "start_bonus_orders": [],
+    "shaped_reward_params": None
+}
