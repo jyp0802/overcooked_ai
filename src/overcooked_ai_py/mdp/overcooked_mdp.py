@@ -7,7 +7,7 @@ from collections import defaultdict, Counter, Mapping
 from overcooked_ai_py.utils import pos_distance, read_layout_dict, classproperty
 from overcooked_ai_py.mdp.actions import Action, Direction
 from overcooked_ai_py.mdp.hungarian import get_best_assignment
-
+import random
 def mydebug(msg):
     if type(msg) == list:
         msg = ", ".join([str(x) for x in msg])
@@ -27,6 +27,7 @@ encourage throwing away trash
     #######################
     # GET ALL CONFIG INFO #
     #######################
+
 
 
 def deep_update(source, overrides):
@@ -180,7 +181,7 @@ class Recipe:
         return int(self) >= int(other)
 
     def __repr__(self):
-        return f"{self.container}: {self.ingredients.__repr__()}"
+        return f"+recipe:{self.container}: {self.ingredients.__repr__()}"
 
     def __iter__(self):
         return iter(self.ingredients)
@@ -486,7 +487,7 @@ class FoodState(object):
         return hash((self.name, self.position))
 
     def __repr__(self):
-        return '{}@{}'.format(
+        return 'Food: {}@{}'.format(
             self.name, self.position)
 
     def __str__(self):
@@ -539,11 +540,12 @@ class ContainerState(object):
 
     def __repr__(self):
         ingredients_str = self._ingredients.__repr__()
-        return "{}@{} - Ingredients: {} - Cooking Tick: {}" \
+        return "container: {}@{} - Ingredients: {} - Cooking Tick: {}" \
             .format(self.name, self.position, ingredients_str, self._cooking_tick)
 
     def __str__(self):
-        res = "{["
+        res = self.name + ":"
+        res += "{["
         res += ",".join(sorted(self.ingredients))
         res += "]"
         if self.is_cooking:
@@ -750,6 +752,12 @@ class PlayerState(object):
     def get_object(self):
         assert self.has_object()
         return self.held_object
+    
+    def get_object_ftask(self):
+        if self.has_object():
+            return self.held_object
+        
+        return None
 
     def set_object(self, obj):
         assert not self.has_object()
@@ -783,11 +791,11 @@ class PlayerState(object):
 
     def __repr__(self):
         return '{} facing {} holding {}'.format(
-            self.position, self.orientation, str(self.held_object))
+            str(self.position) + "hello", self.orientation, str(self.held_object))
     
     def to_dict(self):
         return {
-            "position": self.position,
+            "position": self.position + "hello",
             "orientation": self.orientation,
             "held_object": self.held_object.to_dict() if self.held_object is not None else None
         }
@@ -808,7 +816,7 @@ class PlayerState(object):
 
 class OvercookedState(object):
     """A state in OvercookedGridworld."""
-    def __init__(self, players, objects, bonus_orders=[], all_orders=[], timestep=0, **kwargs):
+    def __init__(self,players, objects, bonus_orders=[], all_orders=[], timestep=0,graph_np = None, **kwargs):
         """
         players (list(PlayerState)): Currently active PlayerStates (index corresponds to number)
         objects (dict({tuple:list(FoodState or ContainerState)})):  Dictionary mapping positions (x, y) to FoodState or ContainerState. 
@@ -828,10 +836,22 @@ class OvercookedState(object):
         self._bonus_orders = bonus_orders
         self._all_orders = all_orders
         self.timestep = timestep
+        #### FOR TASKGRAPH ####
+        # if graph_np == None:
+
+        #     self.graph_np = [[-1,-1,0,-1,-1], [-1,-1,0,-1,-1],[-1,-1,-1,-1,0],[-1,-1,-1,-1,0],[-1,-1,-1,-1,-1]]
+        # else : 
+        #     self.graph_np = graph_np
+        #######################
 
         assert len(set(self.bonus_orders)) == len(self.bonus_orders), "Bonus orders must not have duplicates"
         assert len(set(self.all_orders)) == len(self.all_orders), "All orders must not have duplicates"
         assert set(self.bonus_orders).issubset(set(self.all_orders)), "Bonus orders must be a subset of all orders"
+
+    # def change_graph_np(self, joint_action_idx):
+    #     for i in range(5):
+    #         self.graph_np[joint_action_idx][i] = 1
+    #     return self.graph_np
 
     @property
     def player_positions(self):
@@ -902,6 +922,12 @@ class OvercookedState(object):
     def get_object(self, pos):
         assert self.has_object(pos)
         return self.objects[pos]
+    
+    def get_object_ftask(self, pos):
+        if self.has_object(pos):
+            return self.objects[pos]
+        
+        return None
 
     def add_object(self, obj, pos=None):
         if pos is None:
@@ -942,8 +968,10 @@ class OvercookedState(object):
             objects={pos:obj.deepcopy() for pos, obj in self.objects.items()}, 
             bonus_orders=[order.to_dict() for order in self.bonus_orders],
             all_orders=[order.to_dict() for order in self.all_orders],
-            timestep=self.timestep)
+            timestep=self.timestep,
+            # graph_np = self.graph_np
 
+        )
     def time_independent_equal(self, other):
         order_lists_equal = self.all_orders == other.all_orders and self.bonus_orders == other.bonus_orders
 
@@ -961,7 +989,7 @@ class OvercookedState(object):
             (self.players, tuple(self.objects.values()), order_list_hash)
         )
 
-    def __str__(self):
+    def __str__(self): # state나올때 여기로 나옴. 
         return 'Players: {}, Objects: {}, Bonus orders: {} All orders: {} Timestep: {}'.format( 
             str(self.players), str(list(self.objects.values())), str(self.bonus_orders), str(self.all_orders), str(self.timestep))
 
@@ -1011,6 +1039,7 @@ class OvercookedGridworld(object):
         self.height = len(terrain)
         self.width = len(terrain[0])
         self.shape = (self.width, self.height)
+        
         self.terrain_mtx = terrain
         self.terrain_pos_dict = self._get_terrain_type_pos_dict()
         self.start_player_positions = start_player_positions
@@ -1024,6 +1053,7 @@ class OvercookedGridworld(object):
         self._opt_recipe_cache = {}
         self._prev_potential_params = {}
         self.default_objects = default_objects
+        # self.graph_np = np.array([[-1, 0, 0, 0, 0], []])
 
     @staticmethod
     def from_layout_name(layout_name, **params_to_overwrite):
@@ -1211,9 +1241,17 @@ class OvercookedGridworld(object):
 
         new_state = state.deepcopy()
 
+        ##### FOR TASKGRAPH ######
+        # # action change
+        # joint_action_idx = self.check_graph_actions(joint_action, state)
+        # # update 
+        # new_state.change_graph_np(joint_action_idx)   
+        #########################
+
         # Resolve interacts first
         sparse_reward_by_agent, shaped_reward_by_agent = self.resolve_interacts(new_state, joint_action, events_infos)
 
+        # deepcopy문제인건가?
         assert new_state.player_positions == state.player_positions
         assert new_state.player_orientations == state.player_orientations
         
@@ -1244,8 +1282,7 @@ class OvercookedGridworld(object):
         first and then player 2's, without doing anything like collision checking.
         """
         # JYP: remove this as nothing uses the pot_states except logging functions
-        # pot_states = self.get_pot_states(new_state)
-
+        
         # We divide reward by agent to keep track of who contributed
         sparse_reward, shaped_reward = [0] * self.num_players, [0] * self.num_players 
 
@@ -1267,6 +1304,7 @@ class OvercookedGridworld(object):
                 # If player is holding an object
                 if player.has_object():
                     player_object = player.get_object()
+                    # print("hihihihihihihihih",player_object)
                     # If object in front of player, interact with the object there no matter what the platform underneath
                     if new_state.has_object(i_pos):
                         front_object = new_state.get_object(i_pos)
@@ -1328,6 +1366,9 @@ class OvercookedGridworld(object):
                                 delivery_reward = self.deliver_food(new_state, player, player_object)
                                 ## Reward
                                 sparse_reward[player_idx] += delivery_reward
+                                print("sparse_reward : ", sparse_reward[player_idx])
+                                print("if deliver is going")
+                                
                                 ## Log
                                 # events_infos['deliver'][player_idx] = True
                         elif terrain_name == "bin":
@@ -1391,6 +1432,70 @@ class OvercookedGridworld(object):
                         obj.begin_cooking()
 
         return sparse_reward, shaped_reward
+
+    #################FOR TASKGRAPH#################
+    def check_action_work(self, new_state, player, action):
+
+        pos, o = player.position, player.orientation
+        i_pos = Action.move_in_direction(pos, o)
+        terrain_type = self.get_terrain_type_at_pos(i_pos)
+        terrain_name = CFG_SYMBOL_TO_TERRAIN[terrain_type]
+
+        if action == Action.INTERACT:
+
+            # If player check_action_is holding an object
+            if player.has_object():
+                player_object = player.get_object()
+                
+                # If object in front of player, interact with the object there no matter what the platform underneath
+                if new_state.has_object(i_pos):
+                    front_object = new_state.get_object(i_pos)
+                    
+                    if type(player_object) is FoodState and type(front_object) is ContainerState:
+                        if front_object.can_add([player_object.name]):
+                            return ["interact", "add_ingredient_to_container"]
+
+                        
+                    # player: container, front: container
+                    elif type(player_object) is ContainerState and type(front_object) is ContainerState:
+                        if not player_object.is_cooking and not front_object.is_cooking:    
+                            if front_object.can_add(player_object.ingredients):
+                                return ["interact", "move_food_from_container"]
+    
+                # If no object in front of player, interact with the platform
+                else:
+                    if terrain_name == "deliver":
+                        if type(player_object) is ContainerState and player_object.is_ready and CFG_CONTAINER_INFO[player_object.name].get("deliverable"):
+                            return ["interact","deliver"]
+                            
+                    if terrain_name == "bin":
+                        if type(player_object) is FoodState:
+                            return ["interact", "throw_away_food"]
+                           
+                        elif type(player_object) is ContainerState:
+                            return ["interact", "throw_away_container"]
+                           
+                    elif CFG_TERRAIN_INFO.get(terrain_name, {}).get("placeable"):
+                        return ["interact", "place_object"]
+                        
+            # If player is not holding an object
+            else:
+                # If object in front of player, pick up the object
+                if new_state.has_object(i_pos):
+                    return ["interact", "pickup_object"]
+                    
+                # If no object in front of player, pickup from the dispenser
+                elif CFG_TERRAIN_INFO.get(terrain_name, {}).get("dispenser"):
+                    return ["interact", "pickup_dispenser"]
+        
+        elif action == Action.ACTIVATE:
+            if not player.has_object() and new_state.has_object(i_pos) and terrain_name in CFG_STATION_INFO:
+                obj = new_state.get_object(i_pos)
+                if type(obj) is ContainerState and obj.is_idle and not obj.is_empty and obj.name in CFG_STATION_INFO[terrain_name]:
+                    return ["interact", "start_cooking"]
+                    
+        return "fail"
+    ###############################################TASKGRAPH
 
     def deliver_food(self, state, player, dish):
         """
@@ -1774,12 +1879,14 @@ class OvercookedGridworld(object):
     # STATE ENCODINGS #
     ###################
 
-    def lossless_state_encoding(self, overcooked_state, horizon=400, debug=False):
+    def lossless_state_encoding(self, overcooked_state, horizon=400, debug= False):
         """
         Featurizes a OvercookedState object into a stack of boolean masks that are easily readable by a CNN
         """
+        # print("lossless")
         num_players = len(overcooked_state.players)
-
+        # print(overcooked_state)
+        # print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
         terrain_location_features = [f"{terrain}_terrain_loc" for terrain in CFG_TERRAIN_INFO]
         object_location_features = [f"{elem}_object_loc" for elem in CFG_ALL_OBJECTS]
         object_state_features = [f"{ingredient}_in_{container}" for ingredient in CFG_ALL_INGREDIENTS for container in CFG_ALL_CONTAINERS] + \
@@ -1791,6 +1898,22 @@ class OvercookedGridworld(object):
             layer = np.zeros(self.shape)
             layer[position] = value
             return layer
+
+        # action_len = 10
+        # action_shape = (action_len, action_len)
+        # def make_action_layer(postion, value):
+        #     action_layer = np.zeros(action_shape)
+        #     action_layer[position] = value 
+        #     return action_layer
+
+
+        # def process_for_action():
+        #     for i in range(action_len):
+        # print(overcooked_state.graph_np)
+                
+
+
+
 
         def process_for_player(primary_agent_idx):
             # Ensure that primary_agent_idx layers are ordered before other agents' layers
@@ -1844,14 +1967,26 @@ class OvercookedGridworld(object):
 
             # Stack of all the state masks, order decided by order of LAYERS
             state_mask_stack = np.array([state_mask_dict[layer_id] for layer_id in LAYERS])
+            # print("$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$")
+            # print(state_mask_stack)
             state_mask_stack = np.transpose(state_mask_stack, (1, 2, 0))
+            # print("################################################################")
+            # print(state_mask_stack)
             assert state_mask_stack.shape[:2] == self.shape
             assert state_mask_stack.shape[2] == len(LAYERS)
             # NOTE: currently not including time left or order_list in featurization
+            # print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
+            # print(np.array(state_mask_stack).astype(int))
             return np.array(state_mask_stack).astype(int)
 
         # NOTE: Currently not very efficient, a decent amount of computation repeated here
         final_obs_for_players = tuple(process_for_player(i) for i in range(num_players))
+        # print(final_obs_for_players)
+        # print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+        # final_obs_for_players = final_obs_for_players + tuple(overcooked_state.graph_np)
+        # print(final_obs_for_players)
+        # print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+
         return final_obs_for_players
 
     def featurize_state(self, overcooked_state, mlam, num_containers=2, **kwargs):
@@ -1907,7 +2042,7 @@ class OvercookedGridworld(object):
                     [player_j.pos - player_i.pos for j != i]
 
         """
-
+        # print("featurize")
         all_features = {}
 
         OBJ_TO_IDX = {name: idx for idx, name in enumerate(CFG_ALL_OBJECTS)}
